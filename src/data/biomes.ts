@@ -22,7 +22,7 @@ export interface BiomeDef {
   subtitle: string;
   width: number;
   groundBase: number;
-  factoryEnd: number;      // region A (full construction) ends here
+  factoryEnd: number;      // the flat, sheltered factory ground ends here (you may still build up to the forest)
   targetStart: number;     // region C
   targetEnd: number;
   /** the sea on the left: x1 is the shoreline, it extends beyond the map edge */
@@ -47,7 +47,7 @@ export interface BiomeDef {
 export const BIOMES: BiomeDef[] = [
   {
     id: 'forest', name: 'Floresta', subtitle: 'Nível 1',
-    width: 3300, groundBase: 1100, factoryEnd: 900, targetStart: 1400, targetEnd: 2900,
+    width: 3800, groundBase: 1100, factoryEnd: 1500, targetStart: 1900, targetEnd: 3400,
     sea: { x0: -4000, x1: 440, depth: 190 },
     hills: { amp: 26, scale: 520, seed: 3 },
     mountains: [],
@@ -65,7 +65,7 @@ export const BIOMES: BiomeDef[] = [
   },
   {
     id: 'fields', name: 'Campos', subtitle: 'Nível 2',
-    width: 4800, groundBase: 1100, factoryEnd: 1100, targetStart: 2900, targetEnd: 4500,
+    width: 4800, groundBase: 1100, factoryEnd: 1600, targetStart: 2900, targetEnd: 4500,
     sea: { x0: -4000, x1: 480, depth: 190 },
     hills: { amp: 40, scale: 700, seed: 11 },
     mountains: [],
@@ -83,7 +83,7 @@ export const BIOMES: BiomeDef[] = [
   },
   {
     id: 'savanna', name: 'Savana', subtitle: 'Nível 3',
-    width: 5400, groundBase: 1100, factoryEnd: 1100, targetStart: 3400, targetEnd: 5100,
+    width: 5400, groundBase: 1100, factoryEnd: 1600, targetStart: 3400, targetEnd: 5100,
     sea: { x0: -4000, x1: 460, depth: 190 },
     hills: { amp: 30, scale: 600, seed: 21 },
     mountains: [],
@@ -101,7 +101,7 @@ export const BIOMES: BiomeDef[] = [
   },
   {
     id: 'mountains', name: 'Montanhas', subtitle: 'Nível 4',
-    width: 5800, groundBase: 1100, factoryEnd: 1200, targetStart: 3900, targetEnd: 5500,
+    width: 5800, groundBase: 1100, factoryEnd: 1700, targetStart: 3900, targetEnd: 5500,
     sea: { x0: -4000, x1: 480, depth: 190 },
     hills: { amp: 40, scale: 500, seed: 31 },
     mountains: [{ x: 2700, w: 800, h: 480 }, { x: 3500, w: 500, h: 260 }],
@@ -119,7 +119,7 @@ export const BIOMES: BiomeDef[] = [
   },
   {
     id: 'desert', name: 'Deserto', subtitle: 'Nível 5',
-    width: 7200, groundBase: 1100, factoryEnd: 1300, targetStart: 5200, targetEnd: 7000,
+    width: 7200, groundBase: 1100, factoryEnd: 1800, targetStart: 5200, targetEnd: 7000,
     sea: { x0: -4000, x1: 440, depth: 190 },
     hills: { amp: 60, scale: 400, seed: 41 },
     mountains: [],
@@ -137,7 +137,7 @@ export const BIOMES: BiomeDef[] = [
   },
   {
     id: 'volcanic', name: 'Região Vulcânica', subtitle: 'Nível 6',
-    width: 7800, groundBase: 1100, factoryEnd: 1300, targetStart: 5700, targetEnd: 7600,
+    width: 7800, groundBase: 1100, factoryEnd: 1800, targetStart: 5700, targetEnd: 7600,
     sea: { x0: -4000, x1: 440, depth: 190 },
     hills: { amp: 50, scale: 350, seed: 51 },
     mountains: [{ x: 3800, w: 600, h: 300 }],

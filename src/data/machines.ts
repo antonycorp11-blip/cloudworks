@@ -25,7 +25,7 @@ export interface MachineDef {
   placement: Placement;
   ports: PortDef[];
   rotatable?: boolean;     // free 360° rotation (wind machines)
-  regionB?: boolean;       // may be built in the transport region
+  regionB?: boolean;       // (legacy) transport-region machine; every machine may now be built up to the forest
   unlockLevel?: number;    // biome index where it becomes available
   /** where vapor is released (local), for emitters */
   vent?: { x: number; y: number };

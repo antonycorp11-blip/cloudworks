@@ -23,7 +23,7 @@ export interface ViewState {
 
 type RGB = [number, number, number];
 interface Puff { x: number; y: number; r: number }
-interface Plant { x: number; kind: 'grass' | 'bush' | 'tree' | 'flower'; th: number; s: number; h: number; g: number }
+interface Plant { x: number; kind: 'grass' | 'bush' | 'tree' | 'flower'; th: number; s: number; h: number; g: number; cl?: number[] }
 type DecorKind = 'pier' | 'wreck' | 'buoy' | 'shack' | 'lantern' | 'crates' | 'barrel' | 'fence' | 'deadtree' | 'rock' | 'pole' | 'skull' | 'windmill' | 'well' | 'cabin' | 'sign' | 'tower' | 'cart';
 interface Decor { kind: DecorKind; x: number; s: number; seed: number; flip: boolean; a: number }
 interface FarProp { kind: 'mill' | 'tree' | 'barn' | 'pole' | 'chimney'; x: number; s: number }
@@ -56,6 +56,13 @@ export class Renderer {
   private birds: Bird[] = [];
   private tumble: { x: number; y: number; vx: number; vy: number; a: number }[] = [];
   private builtFor = '';
+  private skyEnd = new Int32Array(0);
+  private ceil = new Int32Array(0);
+  private stars: { x: number; y: number; ph: number; big: boolean }[] = [];
+  private rowBuf = new Uint32Array(0);
+  private bandBuf = new Uint32Array(0);
+  private rimBuf = new Uint32Array(0);
+  private rowRGB = new Float32Array(0);
   // particle pools (struct-of-arrays)
   private dx = new Float32Array(MAX_DROPS); private dy = new Float32Array(MAX_DROPS); private dvx = new Float32Array(MAX_DROPS); private dvy = new Float32Array(MAX_DROPS); private dn = 0;
   private px = new Float32Array(MAX_SPL); private py = new Float32Array(MAX_SPL); private pvx = new Float32Array(MAX_SPL); private pvy = new Float32Array(MAX_SPL); private pl = new Float32Array(MAX_SPL); private pn = 0;
@@ -250,6 +257,10 @@ export class Renderer {
   private farH(lx: number, seed: number) { return 230 + 120 * noise1(lx / 700, seed) + 40 * noise1(lx / 170, seed + 3); }
   private midH(lx: number, seed: number) { return 105 + 55 * noise1(lx / 420, seed + 5) + 16 * noise1(lx / 80, seed + 9); }
 
+  /**
+   * Sky, hills, sea and ground in one low-res pixel buffer. Every colour is precomputed per frame,
+   * per row or per column (no allocation per pixel): this runs over the whole screen each frame.
+   */
   private drawBackground(sim: Sim, cam: Camera) {
     const W = cam.lowW, H = cam.lowH;
     if (!this.img || this.img.width !== W || this.img.height !== H) {
@@ -257,8 +268,13 @@ export class Renderer {
       this.buf = new Uint32Array(this.img.data.buffer);
       this.light.width = W;
       this.light.height = H;
+      this.skyEnd = new Int32Array(W);
+      this.ceil = new Int32Array(W);
+      this.stars = [];
+      const q = rng(77);
+      for (let k = 0; k < (W * H) / 900; k++) this.stars.push({ x: Math.floor(q() * W), y: Math.floor(q() * H * 0.55), ph: q() * 6, big: q() < 0.15 });
     }
-    const buf = this.buf;
+    const buf = this.buf, skyEnd = this.skyEnd;
     const b = sim.biome, p = b.palette, T = sim.terrain;
     const z = cam.zoom, top = cam.top, left = cam.left;
     const st = this.mood.storm, he = this.mood.health;
@@ -273,110 +289,150 @@ export class Renderer {
     sTop = mixC(sTop, STORM_TOP, st * 0.8);
     sBot = mixC(sBot, STORM_BOT, st * 0.75);
     const haze = mixC(hex(p.haze), sBot, 0.4 + skyH * 0.4);
-    const farC = mixC(mixC(hex(p.farHills), haze, 0.3), STORM_BOT, st * 0.3);
-    const midC = mixC(hex(p.nearHills), STORM_TOP, st * 0.35);
-    const fogC = mixC(haze, hex(p.glow), 0.18);
-    // pale moon behind the storm
-    const sunX = W * 0.78, sunY = H * 0.16, sunR = Math.max(5, Math.min(W, H) * (0.035 + 0.02 * this.mood.sun));
-    const sunC: RGB = mixC(mixC([236, 228, 210], [250, 246, 230], skyH), [255, 226, 150], sun);
-    const sunA = (1 - st * 0.95) * 0.95 * (1 - veil * 0.7);
-    const glowR = sunR * 4;
     const glowC = hex(p.glow);
     const glowK = (1 - st * 0.85) * (0.85 - 0.45 * skyH);
+    const farC = mixC(mixC(hex(p.farHills), haze, 0.3), STORM_BOT, st * 0.3);
+    const midC = mixC(hex(p.nearHills), STORM_TOP, st * 0.35);
+    const fogC = mixC(haze, glowC, 0.18);
+    const sunX = W * 0.78, sunY = H * 0.16, sunR = Math.max(5, Math.min(W, H) * (0.035 + 0.02 * sun));
+    const sunC: RGB = mixC(mixC([236, 228, 210], [250, 246, 230], skyH), [255, 226, 150], sun);
+    const sunA = (1 - st * 0.95) * 0.95 * (1 - veil * 0.7);
     const starA = (1 - st) * (1 - skyH * 0.5) * 0.9;
-    const rows = new Uint32Array(H);
-    const rowRGB: RGB[] = new Array(H);
+
+    // ── per-row sky, plus the band of the Véu hanging low over the horizon ──
+    const rows = this.rowBuf.length === H ? this.rowBuf : (this.rowBuf = new Uint32Array(H));
+    const band = this.bandBuf.length === H ? this.bandBuf : (this.bandBuf = new Uint32Array(H));
+    const rim = this.rimBuf.length === H ? this.rimBuf : (this.rimBuf = new Uint32Array(H));
+    const rr = this.rowRGB.length === H * 3 ? this.rowRGB : (this.rowRGB = new Float32Array(H * 3));
+    const veilC = mixC(mixC(sBot, [40, 34, 40], 0.45 - 0.3 * sun), STORM_BOT, st * 0.4);
     for (let y = 0; y < H; y++) {
       const wy = top + y / z;
-      const t = clamp(wy / b.groundBase, 0, 1);
-      let col = mixC(sTop, sBot, Math.pow(t, 1.6));
-      // dying sun glowing low on the horizon
+      let col = mixC(sTop, sBot, Math.pow(clamp(wy / b.groundBase, 0, 1), 1.6));
       col = mixC(col, glowC, smoothstep(b.groundBase - 560, b.groundBase - 40, wy) * glowK * 0.85);
-      rowRGB[y] = col;
-      rows[y] = packC(rowRGB[y]);
+      rr[y * 3] = col[0]; rr[y * 3 + 1] = col[1]; rr[y * 3 + 2] = col[2];
+      rows[y] = packC(col);
+      band[y] = packC(mixC(col, veilC, 0.5 + 0.25 * veil + 0.15 * (1 - y / H)));
+      rim[y] = packC(mixC(mixC(col, veilC, 0.3), glowC, 0.35 * glowK + 0.05));
     }
-    const dry = hex(p.groundDry), wetC = hex(p.groundWet), dirt = hex(p.dirt), gD = hex(p.grassDry), gW = hex(p.grassWet), rock = hex(p.rock), water = hex(p.water);
-    const waterDeep = mul(water, 0.28), waterTop = mixC(water, [150, 200, 220], 0.25);
-    const pondLevel = lerp(T.pond.bottom + 2, T.pond.rim - 2, smoothstep(b.humidity.start + 8, b.humidity.target, sim.climate.humidity));
+    // ── colour ramps ──
+    const N = 64;
+    const lut = (n: number, f: (t: number) => RGB) => { const a = new Uint32Array(n + 1); for (let k = 0; k <= n; k++) a[k] = packC(f(k / n)); return a; };
+    const farL = lut(N, t => mixC(farC, fogC, t * 0.55)), midL = lut(N, t => mixC(midC, fogC, t * 0.5));
+    const farTop = packC(mixC(farC, glowC, 0.3 * glowK + 0.08)), midTop = packC(mixC(midC, glowC, 0.45 * glowK + 0.08));
+    const water = hex(p.water), waterDeep = mul(water, 0.28), waterTop = mixC(water, [150, 200, 220], 0.25);
+    const waterL = lut(N, t => mixC(mixC(waterTop, waterDeep, t), STORM_BOT, st * 0.3));
+    const foam = packC([222, 236, 244]), foamSoft = packC(mixC(waterTop, [200, 225, 240], 0.4));
+    const shine = packC(mixC(mixC(waterTop, sunC, 0.55 * sunA), STORM_BOT, st * 0.3)), spark = packC(mixC(waterTop, glowC, 0.5 * glowK));
+    const dry = hex(p.groundDry), wetC = hex(p.groundWet), dirt = hex(p.dirt), gD = hex(p.grassDry), gW = hex(p.grassWet), rock = hex(p.rock);
+    const sand: RGB = [176, 150, 108], snow: RGB = [236, 240, 244];
     const tick = Math.floor(this.time * 3);
     const seed = b.hills.seed;
-    const snow: RGB = [236, 240, 244];
+    const zF = 60 * z + 6, zM = 90 * z + 8;
+    const sunCols0 = sunX - sunR * 1.6, sunCols1 = sunX + sunR * 1.6;
+
     for (let sx = 0; sx < W; sx++) {
       const wx = left + (sx + 0.5) / z;
-      const lf = cam.x * 0.25 + (sx - W / 2) / z, lm = cam.x * 0.5 + (sx - W / 2) / z;
+      const lf = cam.x * 0.25 + (sx - W / 2) / z, lm = cam.x * 0.5 + (sx - W / 2) / z, lb = cam.x * 0.1 + (sx - W / 2) / z;
       const syF = Math.round((b.groundBase - this.farH(lf, seed) - top) * z);
       const syM = Math.round((b.groundBase - this.midH(lm, seed) - top) * z);
+      // the Véu: a ragged ceiling of ash overhead, pulled back as it tears open
+      const syB = Math.round(H * (0.09 + 0.05 * noise1(lb / 260, seed + 21) + 0.018 * noise1(lb / 60, seed + 4) - 0.16 * sun + 0.07 * veil));
       const gy = T.groundY(wx);
       const syG = Math.round((gy - top) * z);
       const wet = sim.wet[clamp(Math.floor(wx / 16), 0, sim.wet.length - 1)] ?? 0;
-      const green = Math.max(Math.min(1, sim.forest.lifeAt(wx) * 0.45), wet * 0.4, wx < b.factoryEnd ? 0.12 : 0);
+      const life = sim.forest.lifeAt(wx);
+      const green = Math.max(Math.min(1, life * 0.45), wet * 0.4, wx < b.factoryEnd ? 0.12 : 0);
       const n = hash1(Math.floor(wx / 5), 3) * 0.14 - 0.07;
       const high = b.groundBase - gy;
       const isRock = high > 140;
       const beachK = smoothstep(T.sea.x1 + 70, T.sea.x1 + 10, wx);
-      const soil = isRock ? rock : mixC(mixC(dry, wetC, green * 0.9), [176, 150, 108], beachK * 0.8);
+      const soil = isRock ? rock : mixC(mixC(mixC(dry, wetC, green * 0.9), sand, beachK * 0.8), mul(dry, 0.7), Math.min(0.5, wet * 0.6));
       const grass = isRock && high > 300 ? snow : mixC(mixC(gD, gW, Math.min(1, green * 1.1)), [196, 172, 124], beachK);
-      const grassD = 4 + 4 * green;
-      // the sea: rolling waves near the shore, calmer swell offshore
+      // tufts: grass is thicker and more ragged where the land is alive
+      const grassD = 3 + 4 * green + hash1(Math.floor(wx / 3), 8) * 4 * green;
+      const grassC = packC(grass, 1 + n), grassHi = packC(mixC(grass, glowC, 0.45 * glowK + 0.1)), grassDk = packC(grass, 0.72 + n);
+      const soilC = packC(soil, 1 + n), soilDk = packC(soil, (1 + n) * (0.62 + green * 0.6)), soilLt = packC(soil, 1.3 + n);
+      const base = isRock ? rock : dirt, k0 = 1 + n;
+      const br = base[0] * k0, bg = base[1] * k0, bb = base[2] * k0;
+      const pebble = packC(mixC(base, soil, 0.6), 1.25);
       const shoreK = clamp((wx - (T.sea.x1 - 400)) / 400, 0, 1);
       const wave = (2.5 + 3 * shoreK) * Math.sin(wx / 38 + this.time * 1.6) + 2 * Math.sin(wx / 15 - this.time * 2.4) + 4 * Math.sin(wx / 130 + this.time * 0.7);
       const inSea = wx < T.sea.x1 && gy > T.seaLevel + wave;
-      const inPond = wx > T.pond.x0 && wx < T.pond.x1 && gy > pondLevel;
-      const sw = inSea ? Math.round((T.seaLevel + wave - top) * z) : inPond ? Math.round((pondLevel - top) * z) : H + 1;
+      const sw = inSea ? Math.round((T.seaLevel + wave - top) * z) : H + 1;
       const crest = wave > 4.5;
-      const moonCol = Math.abs(sx - sunX) < sunR * 1.6;
+      const moonCol = sx > sunCols0 && sx < sunCols1;
       const ix = Math.floor(wx / 2);
       const crackable = !isRock && green < 0.45;
-      let i = sx;
-      for (let y = 0; y < H; y++, i += W) {
-        if (y < syF && y < syG && y < sw) {
-          const ddx = sx - sunX, ddy = y - sunY, d2 = ddx * ddx + ddy * ddy;
-          if (sunA > 0.05 && d2 < glowR * glowR) {
-            const sc = rowRGB[y];
-            if (d2 < sunR * sunR) buf[i] = packC(mixC(sc, sunC, sunA));
-            else buf[i] = packC(mixC(sc, sunC, Math.pow(1 - Math.sqrt(d2) / glowR, 2) * 0.55 * sunA));
-          } else if (starA > 0.02 && y < H * 0.55 && hash1(sx * 7 + y * 131, 3) > 0.9965) {
-            const tw = 0.5 + 0.5 * Math.sin(this.time * 3 + sx * 1.7 + y);
-            buf[i] = packC(mixC(rowRGB[y], [230, 236, 255], starA * tw));
-          } else buf[i] = rows[y];
-          continue;
-        }
+      const sky = Math.min(syF, syG, sw, H);
+      skyEnd[sx] = sky;
+      this.ceil[sx] = syB;
+      let i = sx, y = 0;
+      // sky (stars and the sun are added afterwards, only where they are)
+      const yb = Math.max(0, Math.min(sky, syB));
+      for (; y < yb; y++, i += W) buf[i] = band[y];
+      if (y < sky) { buf[i] = rim[y]; y++; i += W; }
+      if (y < sky) { buf[i] = rim[y]; y++; i += W; }
+      for (; y < sky; y++, i += W) buf[i] = rows[y];
+      for (; y < H; y++, i += W) {
         if (y >= sw && y < syG) {
           const dd = (y - sw) / z;
-          let col = mixC(waterTop, waterDeep, Math.min(1, dd / 120));
-          // moonlight / glow reflection shimmering on the swell
-          if (moonCol && dd < 160 && hash1(Math.floor(y / 2) * 31 + tick, sx) > 0.55) col = mixC(col, sunC, 0.55 * sunA * (1 - dd / 160));
-          else if (dd < 40 && hash1(ix * 3 + Math.floor(y / 3) + tick, 4) > 0.97) col = mixC(col, glowC, 0.5 * glowK);
-          if (y <= sw + 1) col = crest || hash1(ix + tick, 1) > 0.85 ? [222, 236, 244] : mixC(waterTop, [200, 225, 240], 0.4);
-          else if (crest && y <= sw + 3) col = mixC(col, [200, 225, 240], 0.45);
-          buf[i] = packC(mixC(col, STORM_BOT, st * 0.3));
+          let c = waterL[Math.min(N, (dd / 120 * N) | 0)];
+          if (moonCol && dd < 160 && hash1(((y >> 1) * 31) + tick, sx) > 0.55 + dd / 400) c = shine;
+          else if (dd < 40 && hash1(ix * 3 + ((y / 3) | 0) + tick, 4) > 0.97) c = spark;
+          if (y <= sw + 1) c = crest || hash1(ix + tick, 1) > 0.85 ? foam : foamSoft;
+          else if (crest && y <= sw + 3) c = foamSoft;
+          buf[i] = c;
           continue;
         }
         if (y < syG) {
-          if (y < syM) {
-            const f = clamp((y - syF) / (60 * z + 6), 0, 1);
-            buf[i] = y === syF ? packC(mixC(farC, glowC, 0.3 * glowK + 0.08)) : packC(mixC(farC, fogC, f * 0.55));
-          } else {
-            const f = clamp((y - syM) / (90 * z + 8), 0, 1);
-            buf[i] = y === syM ? packC(mixC(midC, glowC, 0.45 * glowK + 0.08)) : packC(mixC(midC, fogC, f * 0.5));
-          }
+          if (y < syM) buf[i] = y === syF ? farTop : farL[Math.min(N, ((y - syF) / zF * N) | 0)];
+          else buf[i] = y === syM ? midTop : midL[Math.min(N, ((y - syM) / zM * N) | 0)];
           continue;
         }
         const d = (y - syG) / z;
-        let col: RGB;
-        if (d < grassD && sw > syG) col = y === syG ? mixC(grass, glowC, 0.45 * glowK + 0.1) : mul(grass, 1 + n);
+        let c: number;
+        if (d < grassD && sw > syG) c = y === syG ? grassHi : d > grassD - 1.5 ? grassDk : grassC;
         else if (d < 38) {
-          col = mul(soil, 1 + n);
+          c = soilC;
           if (crackable && d < 30) {
             const u = wx + d * 0.7;
             const crack = (Math.abs(u % 14) < 1.2 && hash1(Math.floor(u / 14), Math.floor(d / 7) + 11) > 0.4)
               || (Math.abs((d % 10) - 5) < 0.7 && hash1(Math.floor(wx / 12), Math.floor(d / 10) + 5) > 0.62);
-            if (crack) col = mul(col, 0.62 + green * 0.6);
+            if (crack) c = soilDk;
           }
-        } else if (d < 150) col = mul(isRock ? rock : dirt, (1 + n) * (1 - (d - 38) / 300));
-        else col = mul(isRock ? rock : dirt, 0.6 + n);
-        if (hash1(ix * 7 + Math.floor(d / 2) * 131, 9) > 0.986) col = mul(col, 1.35);
-        buf[i] = packC(col);
+          if (d < grassD + 3 && sw > syG) c = soilLt; // sunlit lip under the grass
+        } else if (d < 44) c = hash1(ix, Math.floor(d) + 31) > 0.55 ? pebble : soilDk; // a stony layer between soil and earth
+        else {
+          const f = d < 150 ? 1 - (d - 44) / 300 : 0.65;
+          c = pack(br * f, bg * f, bb * f);
+        }
+        if (hash1(ix * 7 + Math.floor(d / 2) * 131, 9) > 0.986) c = pebble;
+        buf[i] = c;
+      }
+    }
+    // stars, only over open sky
+    if (starA > 0.02) {
+      for (const s of this.stars) {
+        if (s.y >= skyEnd[s.x] || s.y <= this.ceil[s.x]) continue;
+        const tw = starA * (0.5 + 0.5 * Math.sin(this.time * 3 + s.ph));
+        const o = s.y * 3;
+        const sp = pack(rr[o] + (230 - rr[o]) * tw, rr[o + 1] + (236 - rr[o + 1]) * tw, rr[o + 2] + (255 - rr[o + 2]) * tw);
+        buf[s.y * W + s.x] = sp;
+        if (s.big && s.x + 1 < W && s.y + 1 < skyEnd[s.x + 1]) { buf[s.y * W + s.x + 1] = sp; buf[(s.y + 1) * W + s.x] = sp; }
+      }
+    }
+    // the pale sun behind the Véu (warm and bigger as it tears open)
+    if (sunA > 0.05) {
+      const gr = sunR * 4, x0 = Math.max(0, Math.floor(sunX - gr)), x1 = Math.min(W - 1, Math.ceil(sunX + gr));
+      const y0 = Math.max(0, Math.floor(sunY - gr)), y1 = Math.min(H - 1, Math.ceil(sunY + gr));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        if (y >= skyEnd[x]) continue;
+        const dx = x - sunX, dy = y - sunY, d2 = dx * dx + dy * dy;
+        if (d2 >= gr * gr) continue;
+        const k = d2 < sunR * sunR ? sunA : Math.pow(1 - Math.sqrt(d2) / gr, 2) * 0.55 * sunA;
+        const j = y * W + x, v = buf[j];
+        const r0 = v & 255, g0 = (v >> 8) & 255, b0 = (v >> 16) & 255;
+        buf[j] = pack(r0 + (sunC[0] - r0) * k, g0 + (sunC[1] - g0) * k, b0 + (sunC[2] - b0) * k);
       }
     }
     this.ctx.putImageData(this.img, 0, 0);
@@ -463,6 +519,8 @@ export class Renderer {
     const he = this.mood.health;
     let prevPole: { x: number; y: number } | null = null;
     for (const d of this.decor) {
+      // dead trees and skulls give way where the forest has come back
+      if ((d.kind === 'deadtree' || d.kind === 'skull') && sim.forest.lifeAt(d.x) > 1.6) continue;
       const gy = T.groundY(d.x);
       if (d.kind === 'pole') {
         const top = { x: d.x, y: gy - 130 };
@@ -707,50 +765,117 @@ export class Renderer {
           break;
         }
         case 'bush': {
-          const r = (4 + 10 * g) * pl.s;
+          const r = (3 + 9 * g) * pl.s;
+          const col = mixC(mul(gd, 0.75), gw, g);
+          c.fillStyle = 'rgba(0,0,0,0.18)'; c.fillRect(pl.x - r * 1.2, gy - 1, r * 2.4, 2);
           c.fillStyle = '#3a2a1c';
-          c.fillRect(pl.x - 1, gy - r, 3, r);
-          c.fillStyle = css(mixC(mul(gd, 0.8), gw, g));
-          c.beginPath(); c.arc(pl.x + sway * 0.4, gy - r * 0.8, r, Math.PI, 0); c.fill();
-          if (g > 0.4) { c.fillStyle = css(mixC(gw, [255, 255, 255], 0.18)); c.beginPath(); c.arc(pl.x - r * 0.3 + sway * 0.4, gy - r * 1.1, r * 0.4, 0, 7); c.fill(); }
+          c.fillRect(pl.x - 1, gy - r * 0.8, 2, r * 0.8);
+          if (g < 0.08) { c.fillRect(pl.x - 4, gy - r, 1.5, r * 0.5); c.fillRect(pl.x + 3, gy - r * 0.9, 1.5, r * 0.4); break; }
+          this.drawCanopy(pl, pl.x + sway * 0.4, gy - r * 0.75, r, col, 4, 0.55, g);
+          if (g > 0.75 && pl.h > 0.5) {
+            c.fillStyle = pl.h > 0.8 ? '#e0524a' : '#f0d060';
+            for (let k = 0; k < 3; k++) c.fillRect(pl.x + (k - 1) * r * 0.55 + sway * 0.4, gy - r * (0.7 + 0.3 * ((k + pl.h * 7) % 2)), 2, 2);
+          }
           break;
         }
         case 'tree': {
-          const s = pl.s * (veg === 'desert' ? 0.7 : veg === 'savanna' ? 1.1 : 1);
-          const h = 72 * s, tw = 7 * s;
-          c.fillStyle = '#3a2618';
-          c.fillRect(pl.x - tw / 2, gy - h, tw, h);
-          c.strokeStyle = '#3a2618';
-          c.lineWidth = 3 * s;
-          c.beginPath();
-          c.moveTo(pl.x, gy - h * 0.6); c.lineTo(pl.x - 18 * s, gy - h * 0.95);
-          c.moveTo(pl.x, gy - h * 0.75); c.lineTo(pl.x + 16 * s, gy - h * 1.05);
-          c.stroke();
-          if (g > 0.02) {
-            const cr = 30 * s * (0.3 + 0.7 * g);
-            const col = mixC(mul(gd, 0.8), gw, g);
-            c.globalAlpha = 0.35 + 0.65 * g;
-            if (veg === 'savanna') {
-              c.fillStyle = css(col);
-              c.fillRect(pl.x - cr * 1.4 + sway, gy - h - cr * 0.3, cr * 2.8, cr * 0.6);
-            } else {
-              c.fillStyle = css(mul(col, 0.72));
-              c.beginPath(); c.arc(pl.x + sway, gy - h + cr * 0.15, cr, 0, 7); c.fill();
-              c.fillStyle = css(col);
-              c.beginPath();
-              c.arc(pl.x + sway, gy - h - cr * 0.1, cr * 0.85, 0, 7);
-              c.arc(pl.x - cr * 0.6 + sway, gy - h + cr * 0.25, cr * 0.6, 0, 7);
-              c.arc(pl.x + cr * 0.6 + sway, gy - h + cr * 0.3, cr * 0.6, 0, 7);
-              c.fill();
-              c.fillStyle = 'rgba(255,255,220,0.14)';
-              c.beginPath(); c.arc(pl.x - cr * 0.3 + sway, gy - h - cr * 0.4, cr * 0.4, 0, 7); c.fill();
+          const kind = veg === 'desert' ? 'cactus' : veg === 'alpine' || (veg === 'forest' && pl.h > 0.72) ? 'pine' : veg === 'savanna' ? 'acacia' : 'oak';
+          const s = pl.s * (kind === 'cactus' ? 0.7 : kind === 'acacia' ? 1.1 : 1);
+          const col = mixC(mul(gd, 0.75), gw, g);
+          c.fillStyle = 'rgba(0,0,0,0.2)'; c.fillRect(pl.x - 22 * s, gy - 1, 44 * s, 2);
+          if (kind === 'cactus') {
+            const h = (14 + 46 * g) * s, cc = css(mixC(mul(gd, 0.7), [90, 140, 70], g)), dk = css(mul(mixC(mul(gd, 0.7), [90, 140, 70], g), 0.7));
+            c.fillStyle = dk; c.fillRect(pl.x - 4 * s, gy - h, 8 * s, h);
+            c.fillStyle = cc; c.fillRect(pl.x - 4 * s, gy - h, 5 * s, h);
+            if (g > 0.4) {
+              const ah = h * 0.35;
+              c.fillStyle = dk; c.fillRect(pl.x - 12 * s, gy - h * 0.55 - ah, 5 * s, ah); c.fillRect(pl.x - 12 * s, gy - h * 0.55 - 4 * s, 10 * s, 4 * s);
+              c.fillRect(pl.x + 7 * s, gy - h * 0.7 - ah * 0.8, 5 * s, ah * 0.8); c.fillRect(pl.x + 2 * s, gy - h * 0.7 - 4 * s, 10 * s, 4 * s);
             }
-            c.globalAlpha = 1;
+            if (g > 0.85) { c.fillStyle = '#ff7aa8'; c.fillRect(pl.x - 2 * s, gy - h - 3 * s, 4 * s, 3 * s); }
+            break;
           }
+          const h = 72 * s, tw = 7 * s;
+          // trunk: tapered, lit from the left, with root flares
+          c.fillStyle = '#2a1a10';
+          c.beginPath(); c.moveTo(pl.x - tw * 0.9, gy); c.lineTo(pl.x - tw * 0.4, gy - h); c.lineTo(pl.x + tw * 0.4, gy - h); c.lineTo(pl.x + tw * 0.9, gy); c.closePath(); c.fill();
+          c.fillStyle = '#4a3220'; c.fillRect(pl.x - tw * 0.5, gy - h * 0.95, tw * 0.35, h * 0.9);
+          c.fillStyle = '#2a1a10'; c.fillRect(pl.x - tw * 1.6, gy - 2, tw * 3.2, 2);
+          c.strokeStyle = '#2a1a10';
+          c.lineWidth = 2.5 * s;
+          c.beginPath();
+          if (kind === 'pine') {
+            for (let k = 0; k < 4; k++) { const yy = gy - h * (0.45 + k * 0.15); c.moveTo(pl.x, yy); c.lineTo(pl.x - (12 - k * 2) * s, yy + 5 * s); c.moveTo(pl.x, yy); c.lineTo(pl.x + (12 - k * 2) * s, yy + 5 * s); }
+          } else {
+            c.moveTo(pl.x, gy - h * 0.6); c.lineTo(pl.x - 18 * s, gy - h * 0.95);
+            c.moveTo(pl.x, gy - h * 0.75); c.lineTo(pl.x + 16 * s, gy - h * 1.05);
+            c.moveTo(pl.x - 9 * s, gy - h * 0.78); c.lineTo(pl.x - 12 * s, gy - h * 1.08);
+          }
+          c.stroke();
+          if (g <= 0.02) break;
+          if (kind === 'pine') {
+            // stacked needle tiers, dark below and lit on the left edge
+            const tiers = 4, wv = 26 * s * (0.35 + 0.65 * g);
+            for (let k = 0; k < tiers; k++) {
+              const yb = gy - h * 0.35 - k * h * 0.2, w = wv * (1 - k * 0.2), th = h * 0.32;
+              const dx = sway * (0.3 + k * 0.2);
+              c.fillStyle = css(mul(col, 0.6));
+              c.beginPath(); c.moveTo(pl.x - w + dx, yb); c.lineTo(pl.x + dx, yb - th); c.lineTo(pl.x + w + dx, yb); c.closePath(); c.fill();
+              c.fillStyle = css(col);
+              c.beginPath(); c.moveTo(pl.x - w + dx, yb - 2); c.lineTo(pl.x + dx, yb - th); c.lineTo(pl.x + w * 0.35 + dx, yb - 2); c.closePath(); c.fill();
+              c.fillStyle = css(mixC(col, [255, 250, 210], 0.22));
+              c.fillRect(pl.x - w * 0.55 + dx, yb - th * 0.45, 2, 2);
+            }
+            break;
+          }
+          const cr = 28 * s * (0.3 + 0.7 * g);
+          if (kind === 'acacia') this.drawCanopy(pl, pl.x + sway, gy - h - cr * 0.15, cr, col, 7, 0.32, g, 1.7);
+          else this.drawCanopy(pl, pl.x + sway, gy - h - cr * 0.1, cr, col, 8, 0.5, g);
           break;
         }
       }
     }
+  }
+
+  /**
+   * A crown of leaf clusters: each cluster gets a shadow, a body and a sunlit top-left,
+   * plus a few leaf pixels. Layout is fixed per plant so it doesn't shimmer.
+   */
+  private drawCanopy(pl: Plant, cx: number, cy: number, r: number, col: RGB, n: number, flat: number, g: number, wide = 1) {
+    const c = this.ctx;
+    if (!pl.cl) {
+      const q = rng(Math.floor(pl.x * 13 + pl.h * 1e5));
+      pl.cl = [];
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * Math.PI * 2 + q() * 0.6;
+        const d = k === 0 ? 0 : 0.45 + q() * 0.35;
+        pl.cl.push(Math.cos(a) * d * wide, Math.sin(a) * d * flat - 0.08, 0.42 + q() * 0.3);
+      }
+    }
+    const L = pl.cl;
+    const dark = css(mul(col, 0.55)), mid = css(col), lite = css(mixC(col, [255, 250, 200], 0.2)), leaf = css(mixC(col, [255, 255, 220], 0.35));
+    c.globalAlpha = 0.45 + 0.55 * g;
+    c.fillStyle = dark;
+    c.beginPath();
+    for (let k = 0; k < L.length; k += 3) { const x = cx + L[k] * r + r * 0.08, y = cy + L[k + 1] * r + r * 0.12, rr = L[k + 2] * r; c.moveTo(x + rr, y); c.arc(x, y, rr, 0, 7); }
+    c.fill();
+    c.fillStyle = mid;
+    c.beginPath();
+    for (let k = 0; k < L.length; k += 3) { const x = cx + L[k] * r, y = cy + L[k + 1] * r, rr = L[k + 2] * r * 0.88; c.moveTo(x + rr, y); c.arc(x, y, rr, 0, 7); }
+    c.fill();
+    c.fillStyle = lite;
+    c.beginPath();
+    for (let k = 0; k < L.length; k += 3) {
+      if (L[k + 1] > 0.1) continue; // only the upper clusters catch the light
+      const rr = L[k + 2] * r * 0.45, x = cx + L[k] * r - rr * 0.6, y = cy + L[k + 1] * r - rr * 0.7;
+      c.moveTo(x + rr, y); c.arc(x, y, rr, 0, 7);
+    }
+    c.fill();
+    if (r > 6) {
+      c.fillStyle = leaf;
+      for (let k = 0; k < L.length; k += 3) c.fillRect(cx + L[k] * r - L[k + 2] * r * 0.3, cy + L[k + 1] * r - L[k + 2] * r * 0.5, 2, 1.5);
+    }
+    c.globalAlpha = 1;
   }
 
   creatureX(sim: Sim) { return sim.creature.geometry().cx; }
@@ -1611,7 +1736,7 @@ export class Renderer {
   private drawLighting(cam: Camera) {
     const c = this.ctx, l = this.lctx;
     const st = this.mood.storm, he = this.mood.health;
-    const dark = clamp((0.2 + 0.12 * (1 - he) + st * 0.38 + this.mood.veil * 0.14) * (1 - this.mood.flash * 0.9) * (1 - 0.55 * this.mood.sun), 0, 0.78);
+    const dark = clamp((0.15 + 0.12 * (1 - he) + st * 0.38 + this.mood.veil * 0.14) * (1 - this.mood.flash * 0.9) * (1 - 0.55 * this.mood.sun), 0, 0.78);
     const z = cam.zoom;
     l.setTransform(1, 0, 0, 1, 0, 0);
     l.globalCompositeOperation = 'source-over';
@@ -1645,6 +1770,22 @@ export class Renderer {
       rg.addColorStop(1, `rgba(${L.col},0)`);
       c.fillStyle = rg;
       c.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    // sunbeams pouring through the torn Véu
+    const sun = this.mood.sun * (1 - st * 0.8);
+    if (sun > 0.03) {
+      const sx = cam.lowW * 0.78, sy = cam.lowH * 0.16, len = Math.hypot(cam.lowW, cam.lowH);
+      for (let k = 0; k < 6; k++) {
+        const a = 2.05 + (k - 2.5) * 0.16 + Math.sin(this.time * 0.15 + k * 1.7) * 0.03, w = 0.025 + 0.015 * Math.sin(k * 2.3 + this.time * 0.3);
+        const g = c.createLinearGradient(sx, sy, sx + Math.cos(a) * len * 0.8, sy + Math.sin(a) * len * 0.8);
+        g.addColorStop(0, `rgba(255,226,160,${0.16 * sun})`);
+        g.addColorStop(1, 'rgba(255,226,160,0)');
+        c.fillStyle = g;
+        c.beginPath(); c.moveTo(sx, sy);
+        c.lineTo(sx + Math.cos(a - w) * len, sy + Math.sin(a - w) * len);
+        c.lineTo(sx + Math.cos(a + w) * len, sy + Math.sin(a + w) * len);
+        c.closePath(); c.fill();
+      }
     }
     if (this.mood.flash > 0.02) { c.fillStyle = `rgba(200,210,255,${this.mood.flash * 0.25})`; c.fillRect(0, 0, cam.lowW, cam.lowH); }
     c.globalCompositeOperation = 'source-over';

@@ -181,7 +181,7 @@ export class Game implements InputHandler {
     let x = opts.x ?? this.cam.x;
     let y = opts.y ?? (d.placement === 'mast' ? this.cam.y : this.cam.y + this.cam.viewH * 0.2);
     if (d.placement === 'water' && opts.x == null) x = this.sim.terrain.sea.x1 - 130;
-    if (opts.x == null && x > this.sim.biome.factoryEnd && !d.regionB) x = this.sim.biome.factoryEnd - 100;
+    if (opts.x == null && x > this.sim.biome.targetStart - 100 && d.placement !== 'mast') x = this.sim.biome.targetStart - 160;
     this.want = { x, y };
     this.view.ghost = { kind, angle: opts.angle ?? 0, flip: opts.flip ?? false, power: opts.power ?? 1, x, y, support: y, ok: false };
     this.view.mode = 'place';

@@ -60,7 +60,7 @@ describe('manual cycle: water → steam → cloud → rain → humidity → cred
     let t = 0;
     while (!s.firstRain && t < 180) { run(s, 1); t++; }
     expect(s.firstRain).toBe(true);
-    expect(t).toBeLessThan(100);
+    expect(t).toBeLessThan(150);
     run(s, 20);
     const control = new Sim(0);
     run(control, t + 20);
@@ -489,7 +489,7 @@ describe('the Ancient grows into the factory', () => {
     const s = rise(researched());
     s.credits = 1e6;
     const y = s.biome.groundBase - s.biome.condAlt;
-    const fan = s.build('fan', 1340, y).machine!;
+    const fan = s.build('fan', 1840, y).machine!;
     expect(fan).toBeTruthy();
     const before = s.credits;
     s.climate.humidity = 60;
@@ -501,7 +501,7 @@ describe('the Ancient grows into the factory', () => {
     expect(s.creature.stage).toBeGreaterThanOrEqual(3);
     expect(s.machines.find(m => m.id === fan.id)).toBeUndefined();
     expect(s.credits).toBeGreaterThan(before);
-    expect(s.build('fan', 1340, y).ok).toBe(false);
+    expect(s.build('fan', 1840, y).ok).toBe(false);
   });
   it('its body is an obstacle: clouds are pushed over it', () => {
     const s = rise(new Sim(0));

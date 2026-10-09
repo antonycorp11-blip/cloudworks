@@ -108,7 +108,6 @@ export function resolvePlacement(
     else if (x1 > blockedFrom) reason = 'As raízes da Criatura tomaram este solo';
     else if (x1 > biome.targetStart - 60 && d.placement !== 'mast') reason = 'Na terra a reflorestar só cabem ventiladores';
     else if (x0 > biome.targetEnd) reason = 'Fora da terra a reflorestar';
-    else if (x1 > biome.factoryEnd && !d.regionB) reason = 'Só pode ser construído na área da fábrica';
   }
   if (!reason) {
     const box = machineBox(kind, x, y);
