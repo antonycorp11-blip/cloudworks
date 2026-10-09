@@ -131,7 +131,8 @@ export class Game implements InputHandler {
     }
     this.updateCamera(dt);
     if (this.view.ghost) this.refreshGhost();
-    this.renderer.render(this.sim, this.cam, this.view, dt, t / 1000);
+    // the tree screen covers the world: skip drawing it (the simulation keeps running)
+    if (!this.ui.tree.isOpen) this.renderer.render(this.sim, this.cam, this.view, dt, t / 1000);
     this.audio.setRain(this.renderer.rainVisible);
     this.audio.setAmbience(this.renderer.mood.storm);
     this.ui.update(dt);
@@ -222,10 +223,9 @@ export class Game implements InputHandler {
       ? this.sim.move(g.moveId, this.want.x, this.want.y, g.angle, g.flip)
       : this.sim.build(g.kind, this.want.x, this.want.y, g.angle, g.flip, g.power);
     if (!r.ok) { this.ui.toast(r.reason ?? 'Inválido', 'warn'); this.audio.play('error'); return; }
-    const id = g.moveId ?? (r as { machine?: { id: number } }).machine?.id;
     this.view.ghost = null;
     this.view.mode = 'play';
-    this.view.selection = id != null ? { type: 'machine', id } : null;
+    this.view.selection = null; // built: back to playing, no panel popping up
     this.ui.refreshCtx();
     this.ui.refreshBar();
     this.save();
@@ -280,18 +280,26 @@ export class Game implements InputHandler {
     // play mode
     const m = s.machineAt(wx, wy, 4 * this.cam.unitPerCss + 2);
     if (m) {
-      if (this.lastHold > 0.25 && (m.kind === 'boiler' || m.kind === 'boiler_ind')) { this.select({ type: 'machine', id: m.id }); return; }
-      if (m.kind === 'boiler') {
+      // holding a boiler worked the bellows: releasing it must not open its panel
+      if (this.lastHold > 0.15 && (m.kind === 'boiler' || m.kind === 'boiler_ind')) return;
+      // a tap that did a quick action (pour, stoke) doesn't open the panel either
+      if (m.kind === 'boiler' && (s.bucket > 0 || m.fire < 5)) {
         if (s.bucket > 0) this.feedback(s.pourBucket(m));
-        else if (m.fire < 5) s.stoke(m);
-      } else if (s.bucket > 0 && s.mods.waterCap(m.kind) > 0 && MACHINES[m.kind].ports.some(p => p.fluid === 'water' && p.dir === 'in')) {
-        this.feedback(s.pourBucket(m));
+        else s.stoke(m);
+        return;
       }
-      this.select({ type: 'machine', id: m.id });
+      if (s.bucket > 0 && s.mods.waterCap(m.kind) > 0 && MACHINES[m.kind].ports.some(p => p.fluid === 'water' && p.dir === 'in')) {
+        this.feedback(s.pourBucket(m));
+        return;
+      }
+      const same = this.view.selection?.type === 'machine' && this.view.selection.id === m.id;
+      this.select(same ? null : { type: 'machine', id: m.id }); // tapping it again closes the panel
       return;
     }
     const cl = s.cloudAt(wx, wy);
     if (cl) { this.select({ type: 'cloud', id: cl.id }); return; }
+    const visitor = this.renderer.skyHit(this.cam, wx, wy);
+    if (visitor) { this.ui.skyVisitor(visitor); return; }
     const pipe = s.pipes.find(p => distToPath(p.path, wx, wy) < Math.max(8, 14 * this.cam.unitPerCss));
     if (pipe) { this.select({ type: 'pipe', id: pipe.id }); return; }
     if (s.terrain.isSea(wx) && wy > s.terrain.seaLevel - 60 && wy < s.terrain.groundY(wx) + 20) {
@@ -353,15 +361,7 @@ export class Game implements InputHandler {
       if (port) { this.view.pendingPort = port; this.view.dragPipe = { x: wx, y: wy }; return true; }
       return false;
     }
-    if (this.view.mode === 'play' && this.view.selection?.type === 'machine') {
-      const m = this.sim.machineAt(wx, wy, 6 * this.cam.unitPerCss);
-      if (m && m.id === this.view.selection.id) {
-        this.startMove(m.id);
-        this.want = { x: m.x, y: m.y };
-        this.dragOff = { x: m.x - wx, y: m.y - wy };
-        return true;
-      }
-    }
+    // (dragging a selected machine no longer moves it by accident — use the panel's "Mover")
     return false;
   }
 

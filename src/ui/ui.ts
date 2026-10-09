@@ -27,6 +27,7 @@ export class UI {
   private shopCards: { kind: MachineKind; el: HTMLElement }[] = [];
   private speech: { text: string; shown: number; life: number; angry: boolean } | null = null;
   private risen: boolean | null = null;
+  private coinSfx = 0;
   private missionId = '';
 
   constructor(private g: Game) {
@@ -136,7 +137,7 @@ export class UI {
         const pl = $('h-credits-plate');
         pl.classList.add('bump');
         setTimeout(() => pl.classList.remove('bump'), 120);
-        if (i === 0) this.g.audio.play('coin');
+        if (i === 0 && performance.now() - this.coinSfx > 3500) { this.coinSfx = performance.now(); this.g.audio.play('coin'); }
       }, 850 + i * 70);
     }
   }
@@ -174,6 +175,24 @@ export class UI {
     $('intro-go').textContent = ch.go;
     this.paused = true;
     this.open('intro');
+  }
+
+  /** the player tapped something crossing the far sky */
+  skyVisitor(kind: string) {
+    const s = this.g.sim;
+    if (kind === 'ufo') {
+      const v = Math.round(25 * s.biome.creditPerL);
+      s.earn(v);
+      this.toast(`Você acenou para a nave. Ela piscou as luzes e deixou cair algo brilhante: +${fmt(v)} ₵`, 'good');
+      this.g.audio.play('coin');
+    } else if (kind === 'fairies') {
+      s.pouch = Math.min(s.pouch + 6, 24);
+      this.toast('As fadas riram e encheram sua bolsa: +6 sementes', 'good');
+      this.g.audio.play('mission');
+    } else if (kind === 'serpent') {
+      this.toast('A serpente das nuvens olhou para você. Dizem que ela nadava no céu aberto, antes do Véu.', 'info');
+      this.g.audio.play('grumble');
+    }
   }
 
   /** the six lands and the holes already torn in the Véu */
@@ -311,6 +330,7 @@ export class UI {
     } else if (v.selection) {
       box.innerHTML = this.selectionHtml();
     } else box.innerHTML = '';
+    if (box.innerHTML !== '' && v.mode === 'play') box.insertAdjacentHTML('afterbegin', `<button class="btn iron ctx-x" data-a="close">${icon('close', 14)}</button>`);
     box.classList.toggle('hidden', box.innerHTML === '');
     box.querySelectorAll<HTMLElement>('[data-a]').forEach(b => { b.onclick = () => this.action(b.dataset.a!); });
     box.querySelectorAll<HTMLInputElement>('input[data-s]').forEach(inp => { inp.oninput = () => this.slider(inp.dataset.s!, Number(inp.value)); });
@@ -439,6 +459,7 @@ export class UI {
       case 'ok': g.confirmGhost(); break;
       case 'cancel': g.cancelGhost(); break;
       case 'pipedone': g.setMode('play'); break;
+      case 'close': g.select(null); break;
       case 'seed': if (sel) { res(s.seedByHand(sel.id)); this.refreshCtx(); } break;
       case 'follow': if (sel) { g.cam.followId = g.cam.followId === sel.id ? null : sel.id; this.refreshCtx(); } break;
       case 'rmpipe': if (sel) { s.removePipe(sel.id); g.audio.play('sell'); g.select(null); } break;
@@ -522,7 +543,8 @@ export class UI {
     this.updateMission();
     if (!$('shop').classList.contains('hidden')) this.refreshShop();
     if (this.tree.isOpen) this.tree.refresh();
-    $('b-up').classList.toggle('pulse', !this.tree.isOpen && TREE.some(n => n.id !== 'core' && !n.perm && (s.nodeState(n.id) === 'available' || s.nodeState(n.id) === 'owned') && s.canAfford(s.nodeCost(n.id)) && (n.unlock || s.nodeLevel(n.id) === 0)));
+    // a quiet dot when a new machine can be researched (not for every affordable upgrade)
+    $('b-up').classList.toggle('badge', !this.tree.isOpen && TREE.some(n => n.unlock && s.nodeState(n.id) === 'available' && s.canAfford(s.nodeCost(n.id))));
     this.renderCtx();
   }
 

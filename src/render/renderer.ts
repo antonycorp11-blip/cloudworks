@@ -26,6 +26,8 @@ interface Puff { x: number; y: number; r: number }
 interface Plant { x: number; kind: 'grass' | 'bush' | 'tree' | 'flower'; th: number; s: number; h: number; g: number; cl?: number[] }
 type DecorKind = 'pier' | 'wreck' | 'buoy' | 'shack' | 'lantern' | 'crates' | 'barrel' | 'fence' | 'deadtree' | 'rock' | 'pole' | 'skull' | 'windmill' | 'well' | 'cabin' | 'sign' | 'tower' | 'cart';
 interface Decor { kind: DecorKind; x: number; s: number; seed: number; flip: boolean; a: number }
+export type SkyKind = 'ufo' | 'serpent' | 'fairies' | 'meteor' | 'lanterns';
+interface SkyEvent { kind: SkyKind; t: number; dur: number; dir: number; y: number; seed: number; done: boolean; x?: number; cx?: number; cy?: number }
 interface FarProp { kind: 'mill' | 'tree' | 'barn' | 'pole' | 'chimney'; x: number; s: number }
 interface Bird { x: number; y: number; vx: number; ph: number }
 interface Light { x: number; y: number; r: number; col: string; a: number }
@@ -58,6 +60,8 @@ export class Renderer {
   private builtFor = '';
   private skyEnd = new Int32Array(0);
   private ceil = new Int32Array(0);
+  private sky: SkyEvent[] = [];
+  private skyTimer = 25;
   private stars: { x: number; y: number; ph: number; big: boolean }[] = [];
   private rowBuf = new Uint32Array(0);
   private bandBuf = new Uint32Array(0);
@@ -130,10 +134,11 @@ export class Renderer {
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'source-over';
     this.drawBackground(sim, cam);
+    this.lights.length = 0;
+    this.drawSkyLife(sim, cam, dt);
     this.drawFarProps(sim, cam);
     const z = cam.zoom;
     c.setTransform(z, 0, 0, z, -cam.left * z, -cam.top * z);
-    this.lights.length = 0;
     this.drawTargetMarkers(sim, cam, view);
     this.drawDecor(sim, cam, dt);
     this.drawVegetation(sim, cam, dt);
@@ -436,6 +441,134 @@ export class Renderer {
       }
     }
     this.ctx.putImageData(this.img, 0, 0);
+  }
+
+  // ───────────────────────── life in the far sky ─────────────────────────
+  /**
+   * Rare visitors crossing the distant sky (screen space, behind the world): a flying saucer,
+   * a sky serpent, a swarm of fairies, meteors, drifting lanterns. Some can be tapped.
+   */
+  private drawSkyLife(sim: Sim, cam: Camera, dt: number) {
+    const c = this.ctx, W = cam.lowW, H = cam.lowH, t = this.time;
+    this.skyTimer -= dt;
+    if (this.skyTimer <= 0) {
+      this.skyTimer = 35 + this.rand() * 45;
+      const v = this.rand();
+      const kind: SkyKind = v < 0.22 ? 'ufo' : v < 0.4 ? 'serpent' : v < 0.62 ? 'fairies' : v < 0.85 ? 'meteor' : 'lanterns';
+      const dir = this.rand() < 0.5 ? 1 : -1;
+      const dur = { ufo: 16, serpent: 30, fairies: 18, meteor: 1.4, lanterns: 26 }[kind];
+      this.sky.push({ kind, t: 0, dur, dir, y: H * (0.12 + this.rand() * 0.2), seed: this.rand() * 1000, done: false });
+      if (kind === 'meteor' && this.rand() < 0.5) this.sky.push({ kind, t: -0.3, dur, dir, y: H * (0.08 + this.rand() * 0.15), seed: this.rand() * 1000, done: false });
+    }
+    const end = this.skyEnd;
+    const visible = (x: number, y: number) => x >= 0 && x < W && y < (end[x | 0] ?? H);
+    const light = (x: number, y: number, r: number, col: string, a: number) =>
+      this.lights.push({ x: cam.left + x / cam.zoom, y: cam.top + y / cam.zoom, r: r / cam.zoom, col, a });
+    const s = Math.max(1, Math.min(W, H) / 220); // sprite scale in low-res pixels
+    for (const e of this.sky) {
+      e.t += dt;
+      const k = e.t / e.dur;
+      if (k >= 1 || e.t < 0) continue;
+      const along = e.dir > 0 ? -0.1 * W + k * 1.2 * W : 1.1 * W - k * 1.2 * W;
+      e.x = along;
+      switch (e.kind) {
+        case 'ufo': {
+          // glides, pauses mid-sky to shine a beam, then darts off
+          const pause = k > 0.42 && k < 0.6;
+          const x = e.dir > 0 ? (k < 0.42 ? -0.1 * W + (k / 0.42) * 0.6 * W : pause ? 0.5 * W : 0.5 * W + ((k - 0.6) / 0.4) * 0.65 * W)
+            : (k < 0.42 ? 1.1 * W - (k / 0.42) * 0.6 * W : pause ? 0.5 * W : 0.5 * W - ((k - 0.6) / 0.4) * 0.65 * W);
+          const y = e.y + Math.sin(t * 2 + e.seed) * 3 * s;
+          e.x = x; e.cy = y;
+          if (!visible(x, y)) break;
+          if (pause) {
+            const g = c.createLinearGradient(0, y, 0, y + 60 * s);
+            g.addColorStop(0, 'rgba(160,255,200,0.35)'); g.addColorStop(1, 'rgba(160,255,200,0)');
+            c.fillStyle = g;
+            c.beginPath(); c.moveTo(x - 4 * s, y + 3 * s); c.lineTo(x - 18 * s, y + 60 * s); c.lineTo(x + 18 * s, y + 60 * s); c.lineTo(x + 4 * s, y + 3 * s); c.fill();
+          }
+          c.fillStyle = '#2a2e3a'; c.beginPath(); c.ellipse(x, y, 12 * s, 3.5 * s, 0, 0, 7); c.fill();
+          c.fillStyle = '#7a8aa0'; c.beginPath(); c.ellipse(x, y - 1 * s, 11 * s, 2.5 * s, 0, Math.PI, Math.PI * 2); c.fill();
+          c.fillStyle = 'rgba(150,240,220,0.85)'; c.beginPath(); c.ellipse(x, y - 3 * s, 4.5 * s, 3.5 * s, 0, Math.PI, Math.PI * 2); c.fill();
+          for (let i = 0; i < 5; i++) {
+            const on = Math.floor(t * 6 + i) % 5 === 0;
+            c.fillStyle = on ? '#ffe066' : '#e0524a';
+            c.fillRect(x - 9 * s + i * 4.5 * s, y + 0.5 * s, 1.5 * s, 1.5 * s);
+          }
+          light(x, y, 30 * s, '150,240,220', 0.5);
+          break;
+        }
+        case 'serpent': {
+          // a long sky serpent swimming slowly through the haze
+          const n = 16;
+          for (let i = n - 1; i >= 0; i--) {
+            const sx = along - e.dir * i * 7 * s, sy = e.y + 14 * s + Math.sin(t * 1.3 - i * 0.55 + e.seed) * 9 * s;
+            if (!visible(sx, sy)) continue;
+            const r = (i === 0 ? 5.5 : 5 - i * 0.22) * s;
+            c.fillStyle = `rgba(28,30,46,${0.75 - i * 0.02})`;
+            c.beginPath(); c.arc(sx, sy, Math.max(1, r), 0, 7); c.fill();
+            if (i % 3 === 1) { c.fillStyle = 'rgba(70,90,130,0.6)'; c.fillRect(sx - 1, sy - r, 2, r * 0.5); }
+            if (i === 0) {
+              e.cx = sx; e.cy = sy;
+              c.fillStyle = '#ffcf5a'; c.fillRect(sx + e.dir * 2 * s, sy - 1.5 * s, 1.5 * s, 1.5 * s);
+              light(sx, sy, 16 * s, '255,200,90', 0.4);
+            }
+          }
+          break;
+        }
+        case 'fairies': {
+          const cx = along, cy = e.y + 20 * s + Math.sin(t * 0.9 + e.seed) * 12 * s;
+          e.cx = cx; e.cy = cy;
+          for (let i = 0; i < 9; i++) {
+            const a = t * (1.5 + i * 0.13) + i * 2.1 + e.seed;
+            const x = cx + Math.cos(a) * (6 + i * 1.6) * s, y = cy + Math.sin(a * 1.3) * (4 + i) * s;
+            if (!visible(x, y)) continue;
+            const tw = 0.6 + 0.4 * Math.sin(t * 9 + i * 3);
+            c.fillStyle = i % 3 === 0 ? `rgba(255,190,240,${tw})` : `rgba(200,255,170,${tw})`;
+            c.fillRect(x, y, Math.max(2, 2.2 * s), Math.max(2, 2.2 * s));
+            c.fillStyle = `rgba(230,255,230,${0.25 * tw})`;
+            c.fillRect(x - e.dir * 3 * s, y, 3 * s, 1);
+          }
+          light(cx, cy, 34 * s, '210,255,190', 0.45);
+          break;
+        }
+        case 'meteor': {
+          const x0 = e.dir > 0 ? W * 0.15 : W * 0.85, x = x0 + e.dir * k * W * 0.45, y = e.y + k * H * 0.18;
+          if (!visible(x, y)) break;
+          const g = c.createLinearGradient(x, y, x - e.dir * 40 * s, y - 16 * s);
+          g.addColorStop(0, `rgba(255,240,210,${1 - k})`); g.addColorStop(1, 'rgba(255,240,210,0)');
+          c.strokeStyle = g; c.lineWidth = Math.max(1, s);
+          c.beginPath(); c.moveTo(x, y); c.lineTo(x - e.dir * 40 * s, y - 16 * s); c.stroke();
+          break;
+        }
+        case 'lanterns': {
+          for (let i = 0; i < 7; i++) {
+            const x = along + (i - 3) * 14 * s + Math.sin(t * 0.7 + i) * 3 * s, y = e.y + 50 * s - k * 40 * s + ((i * 37) % 23) * s;
+            if (!visible(x, y)) continue;
+            c.fillStyle = '#ffb04a'; c.fillRect(x, y, 2.5 * s, 3 * s);
+            c.fillStyle = '#ffe9a0'; c.fillRect(x + 0.6 * s, y + 1.5 * s, 1.2 * s, 1.2 * s);
+            light(x, y, 10 * s, '255,180,90', 0.35);
+          }
+          break;
+        }
+      }
+    }
+    this.sky = this.sky.filter(e => e.t < e.dur);
+  }
+
+  /** a tap in the sky: did it hit a visitor? (low-res screen coordinates) */
+  skyHit(cam: Camera, wx: number, wy: number): SkyKind | null {
+    const x = (wx - cam.left) * cam.zoom, y = (wy - cam.top) * cam.zoom;
+    const r = Math.max(14, Math.min(cam.lowW, cam.lowH) / 12);
+    for (const e of this.sky) {
+      if (e.done || e.kind === 'meteor' || e.kind === 'lanterns' || e.cx == null && e.kind !== 'ufo') continue;
+      const ex = e.kind === 'ufo' ? e.x : e.cx, ey = e.cy;
+      if (ex == null || ey == null || Math.hypot(ex - x, ey - y) > r) continue;
+      e.done = true;
+      if (e.kind === 'ufo') e.t = Math.max(e.t, e.dur * 0.6); // startled, it darts away
+      if (e.kind === 'fairies') e.t = e.dur; // they vanish in a puff
+      return e.kind;
+    }
+    return null;
   }
 
   /** parallax silhouettes standing on the mid hills */

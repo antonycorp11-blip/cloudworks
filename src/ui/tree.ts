@@ -24,6 +24,9 @@ export class TreeView {
   private pts = new Map<number, { x: number; y: number; sx: number; sy: number }>();
   private pinch = 0;
   private moved = false;
+  private nodeKeys = new Map<string, string>();
+  private detailKey = '';
+  private headKey = '';
   isOpen = false;
 
   constructor(private g: Game) {
@@ -115,6 +118,9 @@ export class TreeView {
   // ───────────── open / close ─────────────
   open(focus?: string) {
     this.isOpen = true;
+    this.nodeKeys.clear();
+    this.detailKey = '';
+    this.headKey = '';
     $('tree').classList.remove('hidden');
     this.refresh();
     if (focus) { this.select(focus); this.center(false, focus); }
@@ -186,21 +192,30 @@ export class TreeView {
   // ───────────── state rendering ─────────────
   select(id: string | null) {
     this.selected = id;
+    this.nodeKeys.clear();
     for (const [nid, el] of this.nodes) el.classList.toggle('sel', nid === id);
     this.renderDetail();
   }
 
+  /** Only touches the DOM where something actually changed (this runs several times a second). */
   refresh() {
     if (!this.isOpen) return;
     const s = this.g.sim;
-    $('tree-credits').innerHTML = `${icon('coin', 18)}<b>${fmt(s.credits)}</b>`;
-    $('tree-patents').innerHTML = `${icon('star', 18)}<b>${s.patents}</b>`;
+    const head = `${fmt(s.credits)}|${s.patents}`;
+    if (head !== this.headKey) {
+      this.headKey = head;
+      $('tree-credits').innerHTML = `${icon('coin', 18)}<b>${fmt(s.credits)}</b>`;
+      $('tree-patents').innerHTML = `${icon('star', 18)}<b>${s.patents}</b>`;
+    }
     for (const n of TREE) {
       const el = this.nodes.get(n.id)!;
       const st = s.nodeState(n.id);
       const lvl = s.nodeLevel(n.id), max = s.nodeMax(n.id);
       const cost = s.nodeCost(n.id);
       const can = st === 'available' || st === 'owned' ? (n.perm ? s.patents >= cost : s.canAfford(cost)) : false;
+      const key = `${st}|${lvl}|${cost}|${can}|${n.id === this.selected}`;
+      if (this.nodeKeys.get(n.id) === key) continue;
+      this.nodeKeys.set(n.id, key);
       el.className = `tnode ${n.id === 'core' ? 'root' : ''} ${n.unlock ? 'research' : ''} ${n.perm ? 'legacy' : ''} ${st} ${can ? 'afford' : ''} ${n.id === this.selected ? 'sel' : ''}`;
       const pips = el.querySelector('.pips') as HTMLElement;
       pips.innerHTML = max <= 1 || n.id === 'core' ? '' : max <= 8
@@ -211,7 +226,8 @@ export class TreeView {
     }
     for (const e of this.edges) {
       const on = s.nodeLevel(e.to) > 0, ready = s.nodeLevel(e.from) > 0;
-      e.el.setAttribute('class', `edge ${on ? 'on' : ready ? 'ready' : 'off'}`);
+      const cls = `edge ${on ? 'on' : ready ? 'ready' : 'off'}`;
+      if (e.el.getAttribute('class') !== cls) e.el.setAttribute('class', cls);
     }
     this.renderDetail();
   }
@@ -219,9 +235,13 @@ export class TreeView {
   private renderDetail() {
     const box = $('tree-detail');
     const id = this.selected;
-    if (!id) { box.classList.add('hidden'); return; }
+    if (!id) { this.detailKey = ''; box.classList.add('hidden'); return; }
     const s = this.g.sim, n = NODE[id];
     const st = s.nodeState(id), lvl = s.nodeLevel(id), max = s.nodeMax(id), cost = s.nodeCost(id);
+    // rebuild only when what it shows changes — rebuilding under the finger swallowed taps on "Pesquisar"
+    const dkey = `${id}|${st}|${lvl}|${cost}|${(n.perm ? s.patents >= cost : s.canAfford(cost))}`;
+    if (dkey === this.detailKey) return;
+    this.detailKey = dkey;
     const br = BRANCHES[n.branch];
     let effect = '';
     if (n.mod) {
