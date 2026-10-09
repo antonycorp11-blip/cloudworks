@@ -1,0 +1,10 @@
+{
+  // Cloudflare Workers: serve the Vite build (dist/) as static assets.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudworks",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
