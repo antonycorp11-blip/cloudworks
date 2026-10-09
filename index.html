@@ -27,6 +27,7 @@
           <div class="chip" title="Vapor por segundo"><span data-icon="steam" data-size="16"></span><b id="h-steam">0</b></div>
           <div class="chip" title="Nuvens no céu"><span data-icon="cloud" data-size="16"></span><b id="h-clouds">0</b></div>
           <div class="chip bucket" id="h-bucket" title="Balde"><span data-icon="bucket" data-size="16"></span><b id="h-bucket-v">0</b></div>
+          <div class="chip pouch" id="h-pouch" title="Bolsa de sementes: toque numa nuvem e aperte Semear"><span data-icon="seed" data-size="16"></span><b id="h-pouch-v">0</b></div>
         </div>
         <div class="mission frame" id="mission">
           <div class="m-head"><span data-icon="scroll" data-size="16"></span><span>Objetivo</span><b id="m-reward"></b></div>
@@ -47,7 +48,7 @@
         <div class="tube" id="cr-tube" title="Saciedade (umidade do destino)">
           <div class="liquid" id="cr-fill"></div>
           <div class="notch" id="cr-notch"></div>
-          <span class="tube-label">Saciedade <b id="cr-hum">0%</b></span>
+          <span class="tube-label"><span id="cr-tube-name">Saciedade</span> <b id="cr-hum">0%</b></span>
         </div>
         <div class="cr-growth">
           <span class="pips" id="cr-pips"></span>
@@ -97,8 +98,10 @@
         </div>
         <div id="help" class="help hidden">
           <p><b>Segure</b> a caldeira para atiçar o fogo com o fole. <b>Arraste e solte</b> nuvens para arremessá-las.</p>
-          <p>A chuva que cai no destino <b>alimenta a Criatura Ancestral</b>. Ela cresce em estágios — e a cada estágio sente mais sede. Satisfeita, ela paga melhor.</p>
-          <p><b>Construir:</b> escolha na Oficina, arraste o fantasma e confirme. <b>Tubos:</b> arraste de uma saída (quadrado cheio) a uma entrada (quadrado vazado). Azul = água, branco = vapor.</p>
+          <p><b>Chuva sem sementes só molha a poeira.</b> Toque numa nuvem e aperte <b>Semear</b> (bolsa), ou monte a linha de sementes: caldeira → <b>Estufa</b> (vapor + água) → <b>Semeador</b>, debaixo do caminho das nuvens. O vapor que vai para a Estufa não vira nuvem — equilibre as duas coisas.</p>
+          <p>Sementes que caem em solo molhado brotam: capim → arbusto → árvore. Plantas maduras espalham sementes sozinhas. Sem chuva, a terra seca e elas murcham.</p>
+          <p>Quando a <b>vida da terra</b> chega à meta e o <b>coração</b> (a Semente-Mãe) vira árvore, a floresta se levanta: é o Ancião. Depois, a chuva sobre o corpo dele o faz crescer até a forma final — e o Véu se abre.</p>
+          <p><b>Construir:</b> escolha na Oficina, arraste o fantasma e confirme. Sobre a terra a reflorestar só cabem ventiladores. <b>Tubos:</b> arraste de uma saída (quadrado cheio) a uma entrada (quadrado vazado). Azul = água, branco = vapor, verde = sementes.</p>
           <p>Nuvens chovem quando ficam saturadas: ar frio segura menos água. Sobre a fábrica quente, só chovem se ficarem enormes.</p>
           <p>Câmera: arraste o chão ou o céu vazio. Zoom: pinça (ou roda do mouse).</p>
         </div>
@@ -109,7 +112,9 @@
       <div class="modal-box frame small center">
         <div class="win-eye" data-icon="eye" data-size="56"></div>
         <h2 id="win-title"></h2>
-        <p id="win-text" class="quote"></p>
+        <div class="worldmap" id="win-map"></div>
+        <p id="win-text" class="journal"></p>
+        <p id="win-handoff" class="quote"></p>
         <div class="win-stats" id="win-stats"></div>
         <div class="row">
           <button class="btn iron" id="win-stay">Ficar aqui</button>
@@ -132,7 +137,7 @@
       <div class="title-inner">
         <div class="logo"><span>CLOUD</span><span>WORKS</span></div>
         <div class="tagline">A Fábrica de Tempestades</div>
-        <p class="lore">Cem anos de seca. Sob a terra rachada, algo antigo dorme — e tem sede.</p>
+        <p class="lore">Um Véu de cinzas cobriu o céu. Sem sol, o mar não evapora; sem nuvens, não chove. Mas sob a poeira há uma semente — e ela ainda está morna.</p>
         <div class="title-btns">
           <button class="btn big" id="t-play">Jogar</button>
         </div>
@@ -144,7 +149,7 @@
       <button id="b-build"><span data-icon="build" data-size="24"></span><span class="lbl">Oficina</span></button>
       <button id="b-pipe"><span data-icon="pipe" data-size="24"></span><span class="lbl">Tubos</span></button>
       <button id="b-up"><span data-icon="up" data-size="24"></span><span class="lbl">Árvore</span></button>
-      <button id="b-target"><span data-icon="eye" data-size="24"></span><span class="lbl">Criatura</span></button>
+      <button id="b-target"><span data-icon="eye" data-size="24"></span><span class="lbl" id="b-target-lbl">Floresta</span></button>
       <button id="b-home"><span data-icon="home" data-size="24"></span><span class="lbl">Fábrica</span></button>
       <button id="b-menu"><span data-icon="menu" data-size="24"></span><span class="lbl">Menu</span></button>
     </nav>

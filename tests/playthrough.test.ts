@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { Sim, STEP } from '../src/sim/sim';
+import { POUCH_GIVE, Sim, STEP } from '../src/sim/sim';
 import type { Machine } from '../src/sim/types';
 
 /**
- * A scripted player for level 1: starts by hand, buys a pump, automates stoking,
- * then builds an industrial line (boiler + condenser) with fans. Must win in reasonable time.
+ * A scripted player for level 1: starts by hand (bucket, bellows, a pouch of seeds), buys a pump,
+ * automates stoking, builds an industrial cloud line, then the seed line (greenhouse → seeder)
+ * fed by the old boiler. The forest must grow, the Ancient must rise from it and reach its final form.
  */
 function playLevel1(log = false) {
   const s = new Sim(0);
@@ -14,15 +15,24 @@ function playLevel1(log = false) {
   let ind: Machine | null = null;
   let cond: Machine | null = null;
   let pump2: Machine | null = null;
+  let gh: Machine | null = null;
+  let seeder: Machine | null = null;
+  let pump3: Machine | null = null;
   let fans = 0;
   const events: string[] = [];
   let t = 0;
-  const say = (x: string) => { events.push(`${Math.round(t)}s ${x} | ₵${Math.round(s.credits)} H=${s.climate.humidity.toFixed(1)}`); };
+  let awakenAt = -1;
+  const say = (x: string) => { events.push(`${Math.round(t)}s ${x} | ₵${Math.round(s.credits)} vida=${(s.forest.vitality * 100).toFixed(0)}% coração=${s.forest.heartLife.toFixed(2)} H=${s.climate.humidity.toFixed(1)}`); };
 
-  while (t < 1800 && !s.climate.won) {
+  while (t < 3600 && !s.climate.won) {
     // manual play: one bucket every ~3 s and keep the fire going (until automated)
     if (!pump && Math.round(t) % 3 === 0) { s.fillBucket(); s.pourBucket(boiler); }
     if (s.mods.lvl('autoStoke') === 0 && boiler.fire < 2 && boiler.water > 1) s.stoke(boiler);
+    // hand seeding: a handful into any cloud already heading out of the factory
+    if (s.pouch >= POUCH_GIVE) {
+      const c = s.clouds.clouds.find(q => q.x > s.biome.factoryEnd - 100 && q.x < s.biome.targetStart && q.seeds < 4);
+      if (c) s.seedByHand(c.id);
+    }
 
     if (!pump && s.credits >= 45) {
       pump = s.build('pump', 380, 0).machine ?? null;
@@ -39,7 +49,6 @@ function playLevel1(log = false) {
       cond = s.build('condenser', 820, s.biome.groundBase).machine ?? null;
       if (cond) {
         s.connect({ m: ind.id, port: 'out' }, { m: cond.id, port: 'in' });
-        // move the starter fan behind the condenser plume so clouds leave before they get too heavy
         const f = s.machines.find(m => m.kind === 'fan')!;
         s.move(f.id, cond.x - 110, condY - 20, 0, false);
         say('condenser');
@@ -49,31 +58,55 @@ function playLevel1(log = false) {
       pump2 = s.build('pump', 320, 0).machine ?? null;
       if (pump2) { s.connect({ m: pump2.id, port: 'out' }, { m: ind!.id, port: 'in' }); say('pump2'); }
     }
+    // the seed line: the old boiler now feeds a greenhouse instead of the sky
+    if (pump2 && s.nodeLevel('g_estufa') === 0 && s.credits >= s.nodeCost('g_estufa') + 10) { s.research('g_estufa'); say('research greenhouse'); }
+    if (s.nodeLevel('g_estufa') && !gh && s.credits >= 100) {
+      gh = s.build('greenhouse', 480, s.biome.groundBase).machine ?? null;
+      if (gh) {
+        s.connect({ m: boiler.id, port: 'out' }, { m: gh.id, port: 'steam' });
+        s.connect({ m: pump!.id, port: 'out' }, { m: gh.id, port: 'in' });
+        say('greenhouse');
+      }
+    }
+    if (gh && s.nodeLevel('g_seeder') === 0 && s.credits >= s.nodeCost('g_seeder') + 10) { s.research('g_seeder'); say('research seeder'); }
+    if (gh && s.nodeLevel('g_seeder') && !seeder && s.credits >= 80) {
+      seeder = s.build('seeder', 880, s.biome.groundBase).machine ?? null;
+      if (seeder) { s.connect({ m: gh.id, port: 'out' }, { m: seeder.id, port: 'in' }); say('seeder'); }
+    }
+    if (seeder && !pump3 && s.credits >= 60) {
+      pump3 = s.build('pump', 260, 0).machine ?? null;
+      if (pump3) { s.connect({ m: pump3.id, port: 'out' }, { m: ind!.id, port: 'in' }); say('pump3'); }
+    }
     fans = s.machines.filter(m => m.kind === 'fan').length;
-    if (pump2 && fans < 3 && s.credits >= 35) {
-      const x = Math.min(980 + (fans - 1) * 260, s.rootLimit() - 60);
+    if (pump2 && seeder && fans < 7 && s.credits >= 35) {
+      const x = Math.min(980 + (fans - 1) * 300, s.rootLimit() - 60);
       const f = x > 900 ? s.build('fan', x, condY - 20, 0).machine : null;
       if (f) say('fan');
     }
-    if (pump2 && fans >= 2) {
-      if (s.nodeState('k_roots') !== 'maxed' && s.nodeState('k_roots') !== 'locked' && s.credits >= s.nodeCost('k_roots') + 20) { s.research('k_roots'); say('research roots'); }
+    if (seeder && fans >= 3) {
+      for (const k of ['g_seedrate', 'g_germ', 'g_pollen', 'k_roots'] as const) {
+        const st = s.nodeState(k);
+        if (st !== 'maxed' && st !== 'locked' && s.credits >= s.nodeCost(k) + 20) { s.research(k); say(`research ${k}`); }
+      }
       for (const k of ['boilerRate', 'pumpRate', 'fanPower', 'precip'] as const) {
-        if (s.credits >= s.upgradeCost(k) + 20) { s.buyUpgrade(k); say(`up ${k}`); }
+        if (s.credits >= s.upgradeCost(k) + 40) { s.buyUpgrade(k); say(`up ${k}`); }
       }
     }
     for (let i = 0; i < 1 / STEP; i++) s.step();
     t++;
-    if (log && t % 60 === 0) say(`tick clouds=${s.clouds.clouds.length} rain/s=${s.rates.rain.toFixed(2)} lost=${s.stats.lost.toFixed(0)} wasted=${s.stats.rainWasted.toFixed(0)}`);
+    if (awakenAt < 0 && s.creature.awake) { awakenAt = t; say('AWAKEN'); }
+    if (log && t % 120 === 0) say(`tick clouds=${s.clouds.clouds.length} rain/s=${s.rates.rain.toFixed(2)} seeds: feitas=${s.stats.seedsMade.toFixed(0)} solo=${s.stats.seedsRained.toFixed(0)} perdidas=${s.stats.seedsWasted.toFixed(0)} cobertura=${(s.forest.coverage * 100).toFixed(0)}% estágio=${s.creature.stage}`);
   }
-  return { s, t, events };
+  return { s, t, events, awakenAt };
 }
 
 describe('level 1 playthrough', () => {
-  it('can be completed by starting manually and automating', () => {
-    const { s, t, events } = playLevel1(true);
+  it('the forest grows from seeds and rain, the Ancient rises from it and completes the level', () => {
+    const { s, t, events, awakenAt } = playLevel1(true);
     console.log(events.join('\n'));
+    expect(awakenAt).toBeGreaterThan(420);  // the forest takes real work
     expect(s.climate.won).toBe(true);
-    expect(t).toBeLessThan(1500);
-    expect(t).toBeGreaterThan(420); // not trivially short
-  }, 60000);
+    expect(t).toBeLessThan(3000);
+    expect(t).toBeGreaterThan(900);        // not trivially short
+  }, 120000);
 });

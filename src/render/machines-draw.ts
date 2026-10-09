@@ -1,5 +1,5 @@
 // Procedural pixel-ish machine art, drawn in world units (context already transformed).
-import { MACHINES, type MachineKind } from '../data/machines';
+import { MACHINES, type Fluid, type MachineKind } from '../data/machines';
 import type { Machine } from '../sim/types';
 
 export const C = {
@@ -8,6 +8,7 @@ export const C = {
   wood: '#8b5a2b', woodD: '#5e3a1a', brick: '#9b4a35', brickD: '#6e3122',
   fire: '#ff8a2a', fireL: '#ffd35a', water: '#3f8fd0', waterL: '#7cc7ff', steam: '#e8eef2',
   green: '#59c46a', red: '#e0524a', blue: '#5ab0ff', orange: '#e58a2e', teal: '#3fb6a8',
+  seed: '#c8e06a', leaf: '#4f9a3c', leafL: '#7cc84e', glass: '#9fd4c8',
 };
 
 type Ctx = CanvasRenderingContext2D;
@@ -51,7 +52,7 @@ function tankLevel(c: Ctx, x: number, y: number, w: number, h: number, frac: num
   if (fh > 1) R(c, C.waterL, x, y + h - fh, w, 1);
 }
 
-export interface DrawOpts { t: number; waterFrac: number; steamFrac: number; active: boolean; ghost?: boolean }
+export interface DrawOpts { t: number; waterFrac: number; steamFrac: number; active: boolean; ghost?: boolean; seedFrac?: number }
 
 export function drawMachine(c: Ctx, m: Machine, o: DrawOpts, groundAt?: (x: number) => number) {
   const d = MACHINES[m.kind];
@@ -76,6 +77,9 @@ export function drawMachine(c: Ctx, m: Machine, o: DrawOpts, groundAt?: (x: numb
     case 'condenser': drawCondenser(c, m, o); break;
     case 'divider': drawDivider(c, m, o); break;
     case 'platform': drawPlatform(c, m, groundAt); break;
+    case 'greenhouse': drawGreenhouse(c, m, o); break;
+    case 'seeder': drawSeeder(c, m, o); break;
+    case 'compost': drawCompost(c, m, o); break;
   }
   c.restore();
 }
@@ -227,6 +231,91 @@ function drawCondenser(c: Ctx, m: Machine, o: DrawOpts) {
   R(c, C.dark, -31, -25, 7, 7);
 }
 
+/** a glass house on a brick base: steam fogs the panes, sprouts grow in trays inside */
+function drawGreenhouse(c: Ctx, m: Machine, o: DrawOpts) {
+  const on = o.active && m.on;
+  R(c, C.ink, -37, -14, 74, 14);
+  R(c, C.brick, -36, -13, 72, 12);
+  for (let i = 0; i < 6; i++) R(c, C.brickD, -34 + i * 12, -8, 1, 7);
+  // glass body with a pitched roof
+  c.fillStyle = C.ink;
+  c.beginPath(); c.moveTo(-35, -13); c.lineTo(-35, -44); c.lineTo(0, -66); c.lineTo(35, -44); c.lineTo(35, -13); c.closePath(); c.fill();
+  c.fillStyle = on ? 'rgba(170,225,205,0.9)' : 'rgba(120,150,150,0.9)';
+  c.beginPath(); c.moveTo(-33, -14); c.lineTo(-33, -43); c.lineTo(0, -63); c.lineTo(33, -43); c.lineTo(33, -14); c.closePath(); c.fill();
+  // trays of sprouts
+  const grow = Math.min(1, (o.seedFrac ?? 0) * 1.2 + (on ? 0.25 : 0));
+  for (let i = 0; i < 6; i++) {
+    const x = -28 + i * 10;
+    R(c, C.woodD, x - 3, -20, 8, 4);
+    const h = 3 + 9 * grow * (0.6 + 0.4 * Math.sin(i * 1.9));
+    R(c, C.leaf, x, -20 - h, 2, h);
+    R(c, C.leafL, x - 2 + Math.sin(o.t * 2 + i) * 0.6, -20 - h, 3, 2);
+    R(c, C.leafL, x + 1, -20 - h * 0.6, 3, 2);
+  }
+  // iron frame
+  c.strokeStyle = C.dark; c.lineWidth = 1.6;
+  c.beginPath();
+  for (const x of [-22, -11, 0, 11, 22]) { c.moveTo(x, -14); c.lineTo(x, x === 0 ? -63 : -43 - (22 - Math.abs(x)) * 0.6); }
+  c.moveTo(-33, -32); c.lineTo(33, -32);
+  c.stroke();
+  // steam fogging the glass
+  if (on) {
+    c.fillStyle = `rgba(240,248,250,${0.25 + 0.15 * Math.sin(o.t * 1.5)})`;
+    c.beginPath(); c.ellipse(-12, -48, 14, 6, 0, 0, 7); c.ellipse(12, -40, 12, 5, 0, 0, 7); c.fill();
+  }
+  R(c, C.shine, -30, -42, 2, 26);
+  // seed hopper on the outlet side
+  R(c, C.ink, 30, -30, 10, 16);
+  R(c, C.brass, 31, -29, 8, 14);
+  const sf = Math.max(0, Math.min(1, o.seedFrac ?? 0));
+  R(c, C.seed, 32, -16 - 11 * sf, 6, 11 * sf);
+}
+
+/** a short mortar pointing at the sky: it fires seed pods into the cloud above */
+function drawSeeder(c: Ctx, m: Machine, o: DrawOpts) {
+  const firing = o.active && m.on;
+  R(c, C.ink, -19, -14, 38, 14);
+  R(c, C.woodD, -18, -13, 36, 12);
+  R(c, C.wood, -18, -13, 36, 3);
+  // hopper
+  R(c, C.ink, -18, -30, 14, 17);
+  R(c, C.brass, -17, -29, 12, 15);
+  const sf = Math.max(0, Math.min(1, o.seedFrac ?? 0));
+  R(c, C.seed, -16, -15 - 12 * sf, 10, 12 * sf);
+  // barrel
+  const kick = firing ? Math.abs(Math.sin(o.t * 9)) * 2 : 0;
+  R(c, C.ink, -7, -58 + kick, 16, 46);
+  R(c, C.metal, -6, -57 + kick, 14, 44);
+  R(c, C.light, -4, -56 + kick, 3, 42);
+  R(c, C.copper, -8, -46 + kick, 18, 4);
+  R(c, C.copper, -8, -26 + kick, 18, 4);
+  R(c, C.ink, -5, -59 + kick, 12, 3);
+  if (firing) {
+    for (let i = 0; i < 3; i++) {
+      const ph = (o.t * 1.6 + i / 3) % 1;
+      R(c, C.seed, -1 + Math.sin(i * 2.1) * 3, -62 - ph * 40, 3, 3);
+    }
+  }
+}
+
+/** a wooden bin heaped with leaves from the forest */
+function drawCompost(c: Ctx, m: Machine, o: DrawOpts) {
+  R(c, C.ink, -31, -32, 62, 32);
+  R(c, C.woodD, -30, -31, 60, 30);
+  for (let i = 0; i < 4; i++) R(c, C.wood, -30, -29 + i * 8, 60, 5);
+  // the heap
+  c.fillStyle = '#4a3a1c';
+  c.beginPath(); c.ellipse(0, -31, 27, 10, 0, Math.PI, Math.PI * 2); c.fill();
+  for (let i = 0; i < 9; i++) {
+    c.fillStyle = i % 3 === 0 ? '#c8a040' : i % 3 === 1 ? C.leaf : '#8a6a2a';
+    c.fillRect(-22 + i * 5, -34 - Math.abs(Math.sin(i * 1.7)) * 6, 4, 3);
+  }
+  if (m.on && o.active) {
+    c.fillStyle = `rgba(220,230,200,${0.25 + 0.15 * Math.sin(o.t * 2)})`;
+    c.beginPath(); c.arc(-6, -46 - (o.t * 6) % 10, 4, 0, 7); c.arc(8, -50 - (o.t * 5) % 12, 3, 0, 7); c.fill();
+  }
+}
+
 function drawDivider(c: Ctx, m: Machine, o: DrawOpts) {
   R(c, C.ink, -29, -16, 58, 16);
   R(c, C.dark, -28, -15, 56, 15);
@@ -324,8 +413,8 @@ export function drawWind(c: Ctx, kind: MachineKind, spin: number) {
 }
 
 /** Ports: blue = water, white = steam; filled = output, ring = input. */
-export function drawPort(c: Ctx, x: number, y: number, fluid: 'water' | 'steam', dir: 'in' | 'out', size: number, hot = false) {
-  const col = fluid === 'water' ? C.blue : C.steam;
+export function drawPort(c: Ctx, x: number, y: number, fluid: Fluid, dir: 'in' | 'out', size: number, hot = false) {
+  const col = fluid === 'water' ? C.blue : fluid === 'seed' ? C.seed : C.steam;
   R(c, C.ink, x - size - 1, y - size - 1, size * 2 + 2, size * 2 + 2);
   R(c, dir === 'out' ? col : C.ink, x - size, y - size, size * 2, size * 2);
   if (dir === 'in') { c.strokeStyle = col; c.lineWidth = Math.max(1, size * 0.5); c.strokeRect(x - size * 0.6, y - size * 0.6, size * 1.2, size * 1.2); }

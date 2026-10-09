@@ -9,7 +9,8 @@ export type ModKey =
   | 'formation' | 'absorb' | 'fusion' | 'precip'
   | 'fanPower' | 'fanRange' | 'aero'
   | 'autoStoke' | 'helper' | 'smartValves'
-  | 'rootDepth' | 'lullaby' | 'patience';
+  | 'rootDepth' | 'lullaby' | 'patience'
+  | 'seedRate' | 'germination' | 'pollination';
 
 export interface UpgradeDef {
   id: ModKey;
@@ -55,6 +56,10 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'rootDepth', category: 'creature', name: 'Raízes profundas', desc: 'A Criatura cresce mais com cada litro.', baseCost: 80, costMult: 1.8, max: 8, per: 0.15, effectText: pct(0.15) },
   { id: 'lullaby', category: 'creature', name: 'Canção da chuva', desc: 'Satisfeita, a Criatura paga mais.', baseCost: 120, costMult: 1.85, max: 6, per: 0.12, effectText: pct(0.12) },
   { id: 'patience', category: 'creature', name: 'Paciência ancestral', desc: 'A sede da Criatura cresce mais devagar.', baseCost: 150, costMult: 1.9, max: 6, per: 0.08, effectText: l => `-${Math.round(l * 8)}% sede` },
+  // Floresta
+  { id: 'seedRate', category: 'creature', name: 'Estufas férteis', desc: 'Estufas produzem mais sementes com o mesmo vapor.', baseCost: 70, costMult: 1.75, max: 10, per: 0.3, effectText: pct(0.3) },
+  { id: 'germination', category: 'creature', name: 'Germinação', desc: 'Sementes brotam em solo mais seco e cada uma rende mais vida.', baseCost: 110, costMult: 1.8, max: 8, per: 0.15, effectText: pct(0.15) },
+  { id: 'pollination', category: 'creature', name: 'Polinização', desc: 'Arbustos e árvores maduros espalham mais sementes, pelo chão e pelas nuvens que passam.', baseCost: 140, costMult: 1.85, max: 8, per: 0.35, effectText: pct(0.35) },
   { id: 'smartValves', category: 'automation', name: 'Válvulas inteligentes', desc: 'Válvulas abertas só liberam água quando a máquina seguinte precisa, priorizando linhas vazias.', baseCost: 150, costMult: 1, max: 1, per: 1, effectText: l => (l ? 'Ativo' : 'Inativo') },
 ];
 

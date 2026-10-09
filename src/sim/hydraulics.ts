@@ -1,7 +1,7 @@
 // Water & steam: machine production and volume/flow-based pipe transport with pressure head.
 import { MACHINES, type Fluid } from '../data/machines';
 import { findPort, portWorld } from './build';
-import type { Mods } from './stats';
+import { Mods } from './stats';
 import type { Machine, Pipe } from './types';
 
 export interface FluidHost {
@@ -12,11 +12,15 @@ export interface FluidHost {
   isPumpValid(m: Machine): boolean;
   onFireOut?(m: Machine): void;
   vent(m: Machine, cloudMass: number): void;
-  stats: { pumped: number; steam: number };
+  /** seeder: shoot seeds into a cloud right above; returns how many were taken */
+  seedCloud(m: Machine, seeds: number): number;
+  /** greenhouse production multiplier (compost) */
+  greenhouseMul(): number;
+  stats: { pumped: number; steam: number; seedsMade: number };
 }
 
-const buf = (m: Machine, f: Fluid) => (f === 'water' ? m.water : m.steam);
-const add = (m: Machine, f: Fluid, v: number) => { if (f === 'water') m.water += v; else m.steam += v; };
+const buf = (m: Machine, f: Fluid) => (f === 'water' ? m.water : f === 'steam' ? m.steam : m.seeds);
+const add = (m: Machine, f: Fluid, v: number) => { if (f === 'water') m.water += v; else if (f === 'steam') m.steam += v; else m.seeds += v; };
 
 /** Fluid a machine pushes out through its 'out' ports. */
 const outFluid = (m: Machine): Fluid | null => {
@@ -76,6 +80,29 @@ export function stepMachines(h: FluidHost, dt: number, pipesOut: Map<number, Pip
           m.steam -= made;
           h.vent(m, made * mods.condenserEff());
         }
+        break;
+      }
+      case 'greenhouse': {
+        // warm steam + water → seeds; production stops when the seed store is full
+        if (!m.on) break;
+        const room = mods.seedCap(m.kind) - m.seeds;
+        const n = Math.min(
+          mods.seedRate() * h.greenhouseMul() * dt, room,
+          m.steam / Mods.STEAM_PER_SEED, m.water / Mods.WATER_PER_SEED,
+        );
+        if (n > 0) {
+          m.steam -= n * Mods.STEAM_PER_SEED;
+          m.water -= n * Mods.WATER_PER_SEED;
+          m.seeds += n;
+          h.stats.seedsMade += n;
+          made = n;
+        }
+        break;
+      }
+      case 'seeder': {
+        if (!m.on || m.seeds < 0.01) break;
+        made = h.seedCloud(m, Math.min(m.seeds, mods.seederRate() * dt));
+        m.seeds -= made;
         break;
       }
       default:

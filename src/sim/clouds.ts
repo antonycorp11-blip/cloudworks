@@ -13,7 +13,7 @@ export interface CloudHost {
   climate: Climate;
   wind: WindField;
   mods: Mods;
-  onRain(c: Cloud, litres: number, x0: number, x1: number): void;
+  onRain(c: Cloud, litres: number, x0: number, x1: number, seeds: number): void;
   onMerge(into: Cloud, absorbed: Cloud): void;
   onSplit(a: Cloud, b: Cloud): void;
   onLost(mass: number): void;
@@ -68,7 +68,7 @@ export class CloudSystem {
     const c: Cloud = {
       id: this.nextId++, x, y, vx, vy, mass,
       temp: this.host.climate.airTemp(x, y), raining: false, rainRate: 0,
-      seed: Math.floor(Math.random() * 1e9), age: 0, splitCd: 0, pulse: 0,
+      seed: Math.floor(Math.random() * 1e9), age: 0, splitCd: 0, pulse: 0, seeds: 0,
     };
     this.clouds.push(c);
     return c;
@@ -164,12 +164,15 @@ export class CloudSystem {
       if (c.raining) {
         const rate = Math.min(c.mass * 0.5, 0.06 * precip * c.mass * Math.min(ratio, 4));
         const amount = Math.min(c.mass, rate * dt);
+        // seeds fall in proportion to the water that falls
+        const seeds = c.seeds > 0 ? c.seeds * Math.min(1, amount / Math.max(1e-6, c.mass)) : 0;
         c.mass -= amount;
+        c.seeds -= seeds;
         c.rainRate = rate;
         // Rain lands under the cloud, drifting with the wind while it falls.
         const fall = Math.max(0, ground - (c.y + r * 0.4)) / 320;
         const drift = this.w.x * fall * 0.6;
-        this.host.onRain(c, amount, c.x - r * 0.75 + drift, c.x + r * 0.75 + drift);
+        this.host.onRain(c, amount, c.x - r * 0.75 + drift, c.x + r * 0.75 + drift, seeds);
       }
 
       if (c.mass < MIN_MASS) { if (c.held) this.hold = null; continue; } // dissolved
@@ -220,6 +223,8 @@ export class CloudSystem {
           big.temp = (big.temp * big.mass + small.temp * small.mass) / total;
           big.mass = total * 0.99; // 1% lost to turbulence
           big.raining = big.raining || small.raining;
+          big.seeds += small.seeds;
+          big.mother = big.mother || small.mother;
           big.pulse = 1;
           if (small.held) { small.held = false; big.held = true; if (this.hold) this.hold.id = big.id; }
           dead.add(small.id);
@@ -240,9 +245,11 @@ export class CloudSystem {
         const half = (c.mass * 0.99) / 2;
         const off = r * 0.35;
         c.mass = half;
+        c.seeds /= 2;
         const b = this.spawn(c.x + off, c.y + 6, half, c.vx + 22, c.vy - 6);
         b.temp = c.temp;
         b.raining = c.raining;
+        b.seeds = c.seeds;
         c.x -= off;
         c.vx -= 14;
         c.splitCd = b.splitCd = 6;

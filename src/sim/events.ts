@@ -10,7 +10,11 @@ export type SimEvent =
   | { type: 'coins'; x: number; y: number; amount: number }
   | { type: 'mission'; text: string; reward: number }
   | { type: 'throw'; x: number; y: number; speed: number }
-  | { type: 'speak'; text: string; mood: string; kind: string }
+  | { type: 'speak'; text: string; mood: string; kind: string; who?: string }
+  | { type: 'awaken' }
+  | { type: 'sprout'; x: number; y: number; tier: number }
+  | { type: 'mother' }
+  | { type: 'veil'; on: boolean }
   | { type: 'stageUp'; stage: number; final: boolean }
   | { type: 'uproot'; x: number; y: number };
 

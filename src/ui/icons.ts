@@ -33,6 +33,7 @@ const ICONS: Record<string, string[]> = {
   platform: ['............', '............', 'kkkkkkkkkkkk', 'kbbbbbbbbbbk', 'kBBkBBkBBkBk', 'kkkkkkkkkkkk', '.kSk....kSk.', '.kSk....kSk.', '.kSSk..kSSk.', '.kS.kkk..Sk.', '.kSk....kSk.', 'kkkkk..kkkkk'],
   star: ['.....kk.....', '.....kyk....', '....kyyk....', 'kkkkkyyykkkk', 'kyyyyyyyyyyk', '.kyyyyyyyyk.', '..kyyyyyyk..', '..kyyykyyk..', '.kyyk..kyyk.', '.kyk....kyk.', 'kk........kk', '............'],
   lock: ['............', '....kkkk....', '...kSSSSk...', '..kSk..kSk..', '..kSk..kSk..', '.kkkkkkkkkk.', '.kbbbbbbbbk.', '.kbbbkkbbbk.', '.kbbbkkbbbk.', '.kbbbbbbbbk.', '.kkkkkkkkkk.', '............'],
+  seed: ['............', '.....kk.....', '....kgGk....', '...kgGk.....', '...kkkkk....', '..kbyybBk...', '.kbyybbbBk..', '.kbybbbbBk..', '.kbbbbbbBk..', '..kbbbbBk...', '...kkkkk....', '............'],
   leaf: ['............', '........kkk.', '......kkggk.', '....kkgggGk.', '...kggggGGk.', '..kgggGGGk..', '..kggGGGk...', '.kgGGGkk....', '.kGGkk......', 'kGkk........', 'kk..........', '............'],
 };
 

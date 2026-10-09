@@ -6,7 +6,9 @@ import { activeMissions } from '../data/missions';
 import { NODE, STARTER, TREE } from '../data/tree';
 import { findPort, machineBox, pathLength, pipeCost, portWorld, resolvePlacement, routePipe } from './build';
 import { Climate } from './climate';
-import { Creature } from './creature';
+import { Creature, SCALE } from './creature';
+import { CELL, Forest, type ForestSave } from './forest';
+import { chapter } from '../data/story';
 import { CloudSystem, type CloudHost } from './clouds';
 import { EventBus } from './events';
 import { stepMachines, stepPipes, type FluidHost } from './hydraulics';
@@ -14,9 +16,14 @@ import { Mods } from './stats';
 import { Terrain } from './terrain';
 import { cloudRadius, type Cloud, type Machine, type Pipe, type PipeEnd } from './types';
 import { WindField } from './wind';
+import { rng } from './util';
 
 export const STEP = 1 / 30;
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
+/** seeds the engineer carries by hand (refilled by pods the Semente-Mãe lets the wind carry) */
+export const POUCH_MAX = 12;
+export const POUCH_GIVE = 6;
+export const VEIL_LENGTH = 45;
 
 export interface Result { ok: boolean; reason?: string }
 
@@ -28,6 +35,7 @@ export class Sim implements CloudHost, FluidHost {
   terrain!: Terrain;
   climate!: Climate;
   creature!: Creature;
+  forest!: Forest;
   wind!: WindField;
   clouds!: CloudSystem;
   time = 0;
@@ -39,13 +47,23 @@ export class Sim implements CloudHost, FluidHost {
   byId = new Map<number, Machine>();
   nextId = 1;
   bucket = 0;
+  /** hand-carried seeds */
+  pouch = POUCH_MAX;
+  private pouchTimer = 0;
   helperTimer = 0;
+  /** world events: the Nuvem-Mãe and the Véu thickening */
+  motherAt = 360;
+  veilAt = 420;
+  veilLeft = 0;
+  whisperIdx = 0;
+  private transpireTimer = 0;
+  private eventRng = rng(5);
   firstRain = false;
   /** engineering-tree levels by node id */
   tree: Record<string, number> = { core: 1 };
   missionIdx = 0;
   private missionTimer = 0;
-  stats = { pumped: 0, steam: 0, formed: 0, rainTarget: 0, rainWasted: 0, earned: 0, lost: 0, merges: 0, splits: 0 };
+  stats = { ...FRESH_STATS };
   rates = { water: 0, steam: 0, rain: 0, income: 0 };
   /** per-16px ground wetness (visual + feedback), decays over time */
   wet!: Float32Array;
@@ -67,7 +85,11 @@ export class Sim implements CloudHost, FluidHost {
     this.biome = BIOMES[this.biomeIndex];
     this.terrain = new Terrain(this.biome);
     this.climate = new Climate(this.biome);
-    this.creature = new Creature(this.biomeIndex, this.bus, this.biome.targetEnd - 350);
+    // the Semente-Mãe lies 40% into the land; the Ancient that rises there grows back towards the factory
+    const b = this.biome;
+    this.creature = new Creature(this.biomeIndex, this.bus, b.targetStart + 0.4 * (b.targetEnd - b.targetStart) + 90 * SCALE[1]);
+    this.forest = new Forest(this.biome, this.creature.geometry(SCALE[1]).cx);
+    this.forest.onTier = (i, tier) => this.onTier(i, tier);
     this.uprootedStage = 0;
     this.wind = new WindField(this.biome, this.terrain);
     this.clouds = new CloudSystem(this);
@@ -79,13 +101,21 @@ export class Sim implements CloudHost, FluidHost {
     this.firstRain = false;
     this.missionIdx = 0;
     this.lastStage = 0;
+    this.pouch = POUCH_MAX;
+    this.pouchTimer = 0;
+    this.motherAt = 360;
+    this.veilAt = 420;
+    this.veilLeft = 0;
+    this.whisperIdx = 0;
+    this.transpireTimer = 0;
+    this.firstTier = [false, false, false, false];
     this.wet = new Float32Array(Math.ceil(this.biome.width / 16) + 1);
     for (const u of UPGRADES) this.mods.levels[u.id] = 0;
     // modifier nodes reset each biome; research (unlocks) and legacy (patents) are permanent
     for (const id of Object.keys(this.tree)) if (NODE[id]?.mod) delete this.tree[id];
     this.tree.core = 1;
     this.credits = this.biome.startCredits + this.mods.perm.startCredits * 150 * (this.biomeIndex + 1);
-    this.stats = { pumped: 0, steam: 0, formed: 0, rainTarget: 0, rainWasted: 0, earned: 0, lost: 0, merges: 0, splits: 0 };
+    this.stats = { ...FRESH_STATS };
     this.last = { pumped: 0, steam: 0, rain: 0, earned: 0 };
 
     // Starting kit: a humble boiler next to the sea and one basic fan.
@@ -117,7 +147,7 @@ export class Sim implements CloudHost, FluidHost {
   private addMachine(kind: MachineKind, x: number, y: number, angle: number, flip: boolean, support: number): Machine {
     const m: Machine = {
       id: this.nextId++, kind, x, y, angle, flip, on: true, power: 1,
-      water: 0, steam: 0, heat: 0, fire: 0, emitted: 0, rate: 0, boost: 0, support, anim: 0,
+      water: 0, steam: 0, seeds: 0, heat: 0, fire: 0, emitted: 0, rate: 0, boost: 0, support, anim: 0,
     };
     this.machines.push(m);
     this.byId.set(m.id, m);
@@ -146,10 +176,13 @@ export class Sim implements CloudHost, FluidHost {
     this.clouds.step(dt, this.machines.filter(m => m.kind === 'divider'));
     this.stepHelper(dt);
     const m = this.mods;
-    this.creature.perks = { growth: 1 + m.m('rootDepth'), credit: m.m('lullaby'), thirst: 1 - m.m('patience') };
-    this.climate.lossMul = this.creature.thirst;
-    this.climate.coldStart = this.targetRange()[0] + 40;
+    const vit = this.forest.vitality;
+    this.creature.perks = { growth: 1 + m.m('rootDepth'), credit: m.m('lullaby'), thirst: 1 - m.m('patience'), forest: 0.6 + 0.8 * vit };
+    this.climate.lossMul = this.creature.awake ? this.creature.thirst : 1;
+    this.climate.coldStart = Math.min(this.biome.targetStart, this.targetRange()[0]) + 40;
     this.climate.step(dt);
+    this.stepForest(dt);
+    this.stepEvents(dt);
     this.creature.step(dt, this.climate.humidity, this.biome.humidity, this.rainIn, this.rainOut);
     this.rainIn = 0;
     this.rainOut = 0;
@@ -160,7 +193,7 @@ export class Sim implements CloudHost, FluidHost {
     }
     this.checkMilestones();
     this.missionTimer += dt;
-    if (this.missionTimer > 0.4) { this.missionTimer = 0; this.checkMissions(); }
+    if (this.missionTimer > 0.4) { this.missionTimer = 0; this.checkMissions(); this.checkStory(); }
     for (let i = 0; i < this.wet.length; i++) this.wet[i] *= 1 - dt * 0.02;
     this.updateRates(dt);
   }
@@ -203,6 +236,113 @@ export class Sim implements CloudHost, FluidHost {
     }
   }
 
+  // ───────────────────────── the forest ─────────────────────────
+  private firstTier = [false, false, false, false];
+
+  private stepForest(dt: number) {
+    const f = this.forest, cr = this.creature, m = this.mods;
+    f.perks = { germ: m.m('germination'), pollen: m.m('pollination') };
+    f.dryMul = (this.veilLeft > 0 ? 2.2 : 1) * (cr.awake ? 1 + 0.12 * cr.stage * cr.perks.thirst : 1);
+    const gained = f.step(dt);
+    if (gained > 0) {
+      this.stats.life += gained;
+      const v = gained * this.biome.creditPerL * 6;
+      this.earn(v);
+      this.earnAcc += v;
+    }
+    // pollination: clouds drifting over mature plants pick up their seeds
+    const pollen = 0.05 * (1 + m.m('pollination'));
+    for (const c of this.clouds.clouds) {
+      if (!f.inside(c.x)) continue;
+      const l = f.lifeAt(c.x);
+      if (l > 2 && c.seeds < c.mass * 3) c.seeds += pollen * (l - 2) * dt;
+    }
+    // hand-carried seeds: pods drift in from the Semente-Mãe
+    if (this.pouch < POUCH_MAX) {
+      this.pouchTimer += dt;
+      if (this.pouchTimer >= 10) { this.pouchTimer = 0; this.pouch++; }
+    }
+    if (!cr.awake && f.vitality >= this.biome.forest.awaken && f.heartLife >= 2.8) this.awaken();
+    // the risen Ancient breathes clouds out of its back
+    if (cr.awake && cr.stage >= 2) {
+      this.transpireTimer += dt;
+      if (this.transpireTimer >= 12) {
+        this.transpireTimer = 0;
+        const g = cr.geometry();
+        const amount = 0.5 * cr.stage * (0.4 + f.vitality);
+        this.clouds.emit(g.cx, this.terrain.groundY(g.cx) - g.ry * 1.1, amount, 120);
+        this.stats.transpired += amount;
+      }
+    }
+  }
+
+  private awaken() {
+    const cr = this.creature;
+    cr.rise(chapter(this.biomeIndex).awaken);
+    this.lastStage = cr.stage;
+    this.uprootedStage = cr.stage;
+    this.uproot();
+    const bonus = Math.round(40 * this.biome.creditPerL);
+    this.earn(bonus);
+    this.bus.emit({ type: 'awaken' });
+    this.bus.emit({ type: 'sfx', name: 'roar' });
+    this.bus.emit({ type: 'toast', text: `A floresta se levantou: ${cr.def.name}, ${cr.def.title}, despertou! +${bonus} ₵`, kind: 'good' });
+  }
+
+  private onTier(i: number, tier: number) {
+    const x = this.forest.x0 + (i + 0.5) * CELL;
+    this.bus.emit({ type: 'sprout', x, y: this.terrain.groundY(x), tier });
+    if (!this.firstTier[tier]) {
+      this.firstTier[tier] = true;
+      const name = ['', 'Brotou capim', 'Nasceu o primeiro arbusto', 'Nasceu a primeira árvore'][tier];
+      if (name) this.bus.emit({ type: 'toast', text: `${name} na terra seca!`, kind: 'good' });
+    }
+  }
+
+  /** the Nuvem-Mãe (a seed-laden storm) and the Véu thickening */
+  private stepEvents(dt: number) {
+    if (this.climate.won) return;
+    if (this.time >= this.motherAt) {
+      this.motherAt = this.time + 300 + this.eventRng() * 120;
+      const x = this.terrain.sea.x1 - 160;
+      const c = this.clouds.spawn(x, this.clouds.condY - 40, 10 + 3 * this.biomeIndex, 0, 0);
+      c.seeds = 30 + 10 * this.biomeIndex;
+      c.mother = true;
+      c.pulse = 1;
+      this.bus.emit({ type: 'mother' });
+      this.bus.emit({ type: 'sfx', name: 'thunder' });
+      this.bus.emit({ type: 'toast', text: 'Uma Nuvem-Mãe se formou sobre o mar, cheia de sementes! Arraste-a até a floresta.', kind: 'good' });
+    }
+    if (this.veilLeft > 0) {
+      this.veilLeft -= dt;
+      if (this.veilLeft <= 0) {
+        this.veilLeft = 0;
+        this.bus.emit({ type: 'veil', on: false });
+        this.bus.emit({ type: 'toast', text: 'O Véu afinou de novo. O solo volta a secar no ritmo normal.', kind: 'info' });
+      }
+    } else if (this.time >= this.veilAt) {
+      this.veilAt = this.time + 380 + this.eventRng() * 140;
+      this.veilLeft = VEIL_LENGTH;
+      this.bus.emit({ type: 'veil', on: true });
+      this.bus.emit({ type: 'toast', text: 'O Véu engrossou! A terra seca duas vezes mais rápido — mantenha a chuva caindo sobre as plantas.', kind: 'warn' });
+    }
+  }
+
+  /** whispers from under the soil, in step with the forest */
+  private checkStory() {
+    if (this.creature.awake) return;
+    const f = this.forest, aw = this.biome.forest.awaken;
+    const lines = chapter(this.biomeIndex).whispers;
+    const reached = [
+      this.firstRain, f.sprouted, f.vitality >= aw * 0.25, f.vitality >= aw * 0.5,
+      f.heartLife >= 2.2 || f.vitality >= aw * 0.7, f.vitality >= aw * 0.9,
+    ];
+    if (this.whisperIdx < lines.length && reached[this.whisperIdx]) {
+      this.creature.speakText(lines[this.whisperIdx], 'whisper', 'Voz sob a terra');
+      this.whisperIdx++;
+    }
+  }
+
   currentMission() { return activeMissions(this)[this.missionIdx] ?? null; }
   missionReward(units: number) { return Math.round(units * this.biome.creditPerL * 2); }
 
@@ -224,12 +364,16 @@ export class Sim implements CloudHost, FluidHost {
   /** ground including the Ancient's body (clouds slam into it and are pushed up) */
   groundAt(x: number) {
     const g = this.terrain.groundY(x);
+    if (!this.creature.awake) return g;
     const t = this.creature.topAt(x, g);
     return t == null ? g : Math.min(g, t);
   }
-  targetRange() { return this.creature.zone(); }
+  /** the land to reforest */
+  regionRange(): [number, number] { return [this.forest.x0, this.forest.x1]; }
+  /** where rain matters most right now: the whole land before the Ancient rises, then its body */
+  targetRange(): [number, number] { return this.creature.awake ? this.creature.zone() : this.regionRange(); }
   /** build limit: nothing may stand where the roots have grown */
-  rootLimit() { return this.creature.geometry().rootX; }
+  rootLimit() { return this.creature.awake ? this.creature.geometry().rootX : Infinity; }
 
   /** When the Ancient grows, its roots tear up every machine in the way (fully refunded). */
   private uproot() {
@@ -287,6 +431,29 @@ export class Sim implements CloudHost, FluidHost {
   }
   vent(m: Machine, mass: number) { m.emitted += mass; }
 
+  /** a seeder fires seeds straight up into the cloud passing over it */
+  seedCloud(m: Machine, n: number) {
+    const v = MACHINES[m.kind].vent!;
+    const x = m.x, y = m.y + v.y;
+    let best: Cloud | null = null, bd = Infinity;
+    for (const c of this.clouds.clouds) {
+      if (c.y > y) continue;
+      const dx = Math.abs(c.x - x);
+      if (dx > cloudRadius(c.mass) * 0.9 + 20 || y - c.y > 700) continue;
+      if (dx < bd) { bd = dx; best = c; }
+    }
+    if (!best) return 0;
+    best.seeds += n;
+    this.stats.seedsShot += n;
+    m.anim = 1;
+    return n;
+  }
+  /** composters turn leaves from the living forest into fertiliser for the greenhouses */
+  greenhouseMul() {
+    const n = Math.min(4, this.machines.filter(q => q.kind === 'compost' && q.on).length);
+    return 1 + n * (0.15 + 0.5 * this.forest.vitality);
+  }
+
   private fireOutWarnings = 0;
   onFireOut(m: Machine) {
     if (this.mods.lvl('autoStoke') > 0 || this.fireOutWarnings >= 2) return;
@@ -308,37 +475,46 @@ export class Sim implements CloudHost, FluidHost {
     return 'ok';
   }
 
-  onRain(_c: Cloud, litres: number, x0: number, x1: number) {
+  onRain(_c: Cloud, litres: number, x0: number, x1: number, seeds = 0) {
     const b = this.biome;
     const span = Math.max(1, x1 - x0);
-    const [t0, t1] = this.targetRange();
-    const inT = Math.max(0, Math.min(x1, t1) - Math.max(x0, t0));
-    const frac = inT / span;
-    const hit = litres * frac;
+    const [r0, r1] = this.regionRange();
+    // the soil and the seeds
+    const hit = this.forest.addRain(x0, x1, litres, seeds);
+    const seedIn = seeds * (hit / Math.max(1e-9, litres));
+    this.stats.seedsRained += seedIn;
+    this.stats.seedsWasted += seeds - seedIn;
     this.stats.rainWasted += litres - hit;
     // only rain near the destination counts as a "miss" the Ancient notices
-    if (x1 > t0 - 500 && x0 < t1 + 300) this.rainOut += litres - hit;
-    // wet the ground under the rain
+    if (x1 > r0 - 500 && x0 < r1 + 300) this.rainOut += litres - hit;
+    // wet the ground under the rain (visual)
     const i0 = Math.max(0, Math.floor(x0 / 16)), i1 = Math.min(this.wet.length - 1, Math.floor(x1 / 16));
     const per = litres / Math.max(1, i1 - i0 + 1);
     for (let i = i0; i <= i1; i++) this.wet[i] = Math.min(1, this.wet[i] + per * 0.4);
     if (hit <= 0) return;
     this.climate.addRain(hit);
-    this.creature.feed(hit, this.climate.humidity);
-    if (this.creature.stage > this.uprootedStage) { this.uprootedStage = this.creature.stage; this.uproot(); }
-    this.rainIn += hit;
+    // the risen Ancient drinks what falls on its body
+    if (this.creature.awake) {
+      const [t0, t1] = this.creature.zone();
+      const onBody = litres * Math.max(0, Math.min(x1, t1) - Math.max(x0, t0)) / span;
+      if (onBody > 0) {
+        this.creature.feed(onBody, this.climate.humidity);
+        if (this.creature.stage > this.uprootedStage) { this.uprootedStage = this.creature.stage; this.uproot(); }
+        this.rainIn += onBody;
+      }
+    } else this.rainIn += hit;
     this.stats.rainTarget += hit;
     const credits = hit * b.creditPerL * this.creature.creditMul;
     this.earn(credits);
     this.earnAcc += credits;
-    this.coinX = Math.max(t0 + 30, Math.min(t1 - 30, (x0 + x1) / 2));
+    this.coinX = Math.max(r0 + 30, Math.min(r1 - 30, (x0 + x1) / 2));
     if (!this.firstRain) {
       this.firstRain = true;
       const bonus = 50 * (this.biomeIndex + 1);
       this.earn(bonus);
       this.bus.emit({ type: 'firstRain' });
       this.bus.emit({ type: 'sfx', name: 'firstDrops' });
-      this.bus.emit({ type: 'toast', text: `Primeira chuva no destino! +${bonus} ₵`, kind: 'good' });
+      this.bus.emit({ type: 'toast', text: `Primeira chuva na terra seca! +${bonus} ₵`, kind: 'good' });
     }
   }
   onMerge(into: Cloud, absorbed: Cloud) {
@@ -379,6 +555,21 @@ export class Sim implements CloudHost, FluidHost {
     m.fire = Math.min(this.mods.fireDuration() * 2, m.fire + this.mods.fireDuration());
     m.on = true;
     this.bus.emit({ type: 'sfx', name: 'stoke', x: m.x, y: m.y });
+    return { ok: true };
+  }
+
+  /** the engineer throws a handful of seeds into a cloud */
+  seedByHand(id: number): Result {
+    const c = this.clouds.clouds.find(q => q.id === id);
+    if (!c) return { ok: false };
+    if (this.pouch < 1) return { ok: false, reason: 'Bolsa de sementes vazia — ela se enche sozinha aos poucos' };
+    const n = Math.min(this.pouch, POUCH_GIVE);
+    this.pouch -= n;
+    c.seeds += n;
+    c.pulse = 1;
+    this.stats.seededByHand += n;
+    this.bus.emit({ type: 'sfx', name: 'grab' });
+    this.bus.emit({ type: 'float', x: c.x, y: c.y - cloudRadius(c.mass) - 10, text: `+${n} sementes`, color: '#e8d27a' });
     return { ok: true };
   }
 
@@ -595,7 +786,8 @@ export class Sim implements CloudHost, FluidHost {
     if (!this.climate.won) return;
     this.patents += this.biome.reward;
     this.levelsDone = Math.max(this.levelsDone, this.biomeIndex + 1);
-    this.startLevel(Math.min(this.biomeIndex + 1, BIOMES.length - 1));
+    // after the last land the journey starts over (research and patents are kept)
+    this.startLevel(this.biomeIndex + 1 < BIOMES.length ? this.biomeIndex + 1 : 0);
   }
 
   // ───────────────────────── queries ─────────────────────────
@@ -630,6 +822,9 @@ export class Sim implements CloudHost, FluidHost {
       nextId: this.nextId, cloudNext: this.clouds.nextId, stats: this.stats, missionIdx: this.missionIdx,
       creature: { stage: this.creature.stage, growth: this.creature.growth, awake: this.creature.awake },
       uprooted: this.uprootedStage,
+      forest: this.forest.serialize() as ForestSave,
+      pouch: this.pouch, motherAt: this.motherAt, veilAt: this.veilAt, veilLeft: this.veilLeft, whisperIdx: this.whisperIdx,
+      firstTier: this.firstTier,
       machines: this.machines, pipes: this.pipes, clouds: this.clouds.clouds,
     };
   }
@@ -647,17 +842,27 @@ export class Sim implements CloudHost, FluidHost {
     s.climate.humidity = data.humidity; s.climate.stableTime = data.stable; s.climate.won = data.won; s.climate.milestone = data.milestone;
     s.nextId = data.nextId; s.clouds.nextId = data.cloudNext;
     s.stats = { ...s.stats, ...data.stats };
-    s.machines = data.machines.map(m => ({ ...m, boost: 0 }));
+    s.machines = data.machines.map(m => ({ ...m, seeds: m.seeds ?? 0, boost: 0 }));
+    s.forest.restore(data.forest);
+    s.pouch = data.pouch ?? POUCH_MAX;
+    s.motherAt = data.motherAt ?? s.motherAt; s.veilAt = data.veilAt ?? s.veilAt; s.veilLeft = data.veilLeft ?? 0;
+    s.whisperIdx = data.whisperIdx ?? 0;
+    if (data.firstTier) s.firstTier = [...data.firstTier];
     s.missionIdx = data.missionIdx ?? 0;
     if (data.creature) { Object.assign(s.creature, data.creature); s.lastStage = data.creature.stage; s.uprootedStage = data.uprooted ?? data.creature.stage; }
     s.pipes = data.pipes.map(p => ({ ...p, path: p.path.map(v => ({ ...v })) }));
-    s.clouds.clouds = data.clouds.map(c => ({ ...c, held: false }));
+    s.clouds.clouds = data.clouds.map(c => ({ ...c, seeds: c.seeds ?? 0, held: false }));
     s.last = { pumped: s.stats.pumped, steam: s.stats.steam, rain: s.stats.rainTarget, earned: s.stats.earned };
     s.wind.dirty = true;
     s.rebuildIndex();
     return s;
   }
 }
+
+const FRESH_STATS = {
+  pumped: 0, steam: 0, formed: 0, rainTarget: 0, rainWasted: 0, earned: 0, lost: 0, merges: 0, splits: 0,
+  seedsMade: 0, seedsShot: 0, seededByHand: 0, seedsRained: 0, seedsWasted: 0, life: 0, transpired: 0,
+};
 
 function findPortByFluid(m: Machine, fluid: 'water' | 'steam', dir: 'in' | 'out') {
   return MACHINES[m.kind].ports.find(p => p.fluid === fluid && p.dir === dir);

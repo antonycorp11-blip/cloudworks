@@ -1,4 +1,5 @@
-// The Ancient creature rooted in the destination: fed by rain, grows in stages, thirstier each stage.
+// The Ancient: it sleeps inside the Semente-Mãe until the forest around it is alive, then rises
+// from that forest (stage 1). From then on rain on its body feeds it; it grows in stages, thirstier each stage.
 import { CREATURES, LINES, MOOD_MUL, type CreatureDef, type LineKind, type Mood } from '../data/creatures';
 import type { EventBus } from './events';
 
@@ -61,15 +62,25 @@ export class Creature {
   }
   /** thirst multiplier on humidity loss: bigger Ancients dry out faster */
   /** tech-tree perks (set by the sim every step) */
-  perks = { growth: 1, credit: 0, thirst: 1 };
+  perks = { growth: 1, credit: 0, thirst: 1, forest: 1 };
   get thirst() { return (1 + 0.6 * this.stage) * this.perks.thirst; }
   get creditMul() { return MOOD_MUL[this.mood] + (this.mood === 'content' || this.mood === 'euphoric' ? this.perks.credit : 0); }
 
-  /** Rain landing on the destination. Growth only counts fully when the Ancient isn't starving. */
+  /** The forest stands up: the Ancient is born at stage 1. */
+  rise(line: string) {
+    if (this.awake) return;
+    this.awake = true;
+    this.stage = Math.max(1, this.stage);
+    this.growth = Math.max(this.growth, this.def.needs[0] ?? 0);
+    this.mood = 'thirsty';
+    this.speakText(line, 'wake');
+  }
+
+  /** Rain landing on the Ancient. Growth only counts fully when it isn't starving and its forest is alive. */
   feed(litres: number, humidity: number) {
-    if (!this.awake) { this.awake = true; this.say('wake', true); }
+    if (!this.awake) return;
     const eff = Math.max(0.25, Math.min(1.2, (humidity - 12) / 30));
-    this.growth += litres * eff * this.perks.growth;
+    this.growth += litres * eff * this.perks.growth * this.perks.forest;
     while (!this.done && this.growth >= this.def.needs[this.stage]) {
       this.stage++;
       this.bus.emit({ type: 'stageUp', stage: this.stage, final: this.done });
@@ -89,7 +100,7 @@ export class Creature {
       : f < 0.45 ? 'thirsty'
       : f < 0.9 ? 'content' : 'euphoric';
     this.speakCd -= dt;
-    if (!this.awake) { if (this.speakCd < -12) this.say('sleeping'); return; }
+    if (!this.awake) return; // still a seed: the sim voices its whispers
     if (this.mood !== prev && prev !== 'sleeping') this.say(this.mood);
     else if (this.missed > 0.6 && this.fed < 0.2) this.say('missed');
     else if (this.speakCd < -16) this.say(this.fed < 0.02 ? 'idle' : this.mood);
@@ -103,8 +114,12 @@ export class Creature {
     const arr = LINES[kind];
     const i = (this.used.get(kind) ?? Math.floor(Math.random() * arr.length)) % arr.length;
     this.used.set(kind, i + 1);
+    this.speakText(arr[i], kind);
+  }
+
+  speakText(text: string, kind: string, who?: string) {
     this.speakCd = 9;
-    this.bus.emit({ type: 'speak', text: arr[i], mood: this.mood, kind });
+    this.bus.emit({ type: 'speak', text, mood: this.mood, kind, who });
     this.bus.emit({ type: 'sfx', name: 'grumble' });
   }
 }

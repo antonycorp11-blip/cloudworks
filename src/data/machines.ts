@@ -1,17 +1,18 @@
 // Data-driven machine catalogue. Ports are in local coords relative to the machine's
 // bottom-center (y negative = up). Mirrored machines negate port x.
 
-export type Fluid = 'water' | 'steam';
+export type Fluid = 'water' | 'steam' | 'seed';
 export type MachineKind =
   | 'pump' | 'pump_hp' | 'reservoir' | 'valve' | 'splitter'
   | 'boiler' | 'boiler_ind' | 'condenser'
   | 'fan' | 'fan_ind' | 'turbine'
-  | 'platform' | 'divider';
+  | 'platform' | 'divider'
+  | 'greenhouse' | 'seeder' | 'compost';
 
 export interface PortDef { id: string; fluid: Fluid; dir: 'in' | 'out'; x: number; y: number }
 
 export type Placement = 'ground' | 'water' | 'mast' | 'free';
-export type Category = 'water' | 'steam' | 'cloud' | 'wind' | 'struct';
+export type Category = 'water' | 'steam' | 'cloud' | 'wind' | 'struct' | 'life';
 
 export interface MachineDef {
   kind: MachineKind;
@@ -110,6 +111,26 @@ export const MACHINES: Record<MachineKind, MachineDef> = {
     cost: 2500, w: 92, h: 72, category: 'wind', placement: 'mast', rotatable: true, regionB: true,
     ports: [],
   },
+  greenhouse: {
+    kind: 'greenhouse', name: 'Estufa', desc: 'Vapor quente e água viram sementes. Disputa o vapor com as nuvens.',
+    cost: 90, w: 76, h: 66, category: 'life', placement: 'ground',
+    ports: [
+      { id: 'in', fluid: 'water', dir: 'in', x: -40, y: -14 },
+      { id: 'steam', fluid: 'steam', dir: 'in', x: -40, y: -44 },
+      { id: 'out', fluid: 'seed', dir: 'out', x: 40, y: -22 },
+    ],
+  },
+  seeder: {
+    kind: 'seeder', name: 'Semeador', desc: 'Dispara sementes para dentro das nuvens que passam por cima dele.',
+    cost: 70, w: 40, h: 58, category: 'life', placement: 'ground', regionB: true,
+    ports: [{ id: 'in', fluid: 'seed', dir: 'in', x: -22, y: -14 }],
+    vent: { x: 0, y: -60 },
+  },
+  compost: {
+    kind: 'compost', name: 'Composteira', desc: 'Folhas e galhos trazidos da floresta viram adubo: as Estufas produzem mais quanto mais viva estiver a floresta.',
+    cost: 160, w: 60, h: 40, category: 'life', placement: 'ground',
+    ports: [],
+  },
   platform: {
     kind: 'platform', name: 'Plataforma', desc: 'Suporte elevado para construir em altura.',
     cost: 25, w: 140, h: 12, category: 'struct', placement: 'free', regionB: true,
@@ -120,6 +141,7 @@ export const MACHINES: Record<MachineKind, MachineDef> = {
 export const SHOP_ORDER: MachineKind[] = [
   'pump', 'reservoir', 'splitter', 'valve', 'pump_hp',
   'boiler', 'boiler_ind', 'condenser',
+  'greenhouse', 'seeder', 'compost',
   'fan', 'fan_ind', 'turbine',
   'divider', 'platform',
 ];

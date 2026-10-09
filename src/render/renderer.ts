@@ -9,6 +9,7 @@ import type { Sim } from '../sim/sim';
 import { cloudRadius, type Cloud, type Machine } from '../sim/types';
 import { clamp, hash1, lerp, noise1, rng, smoothstep } from '../sim/util';
 import { C, drawMachine, drawPort, drawWind } from './machines-draw';
+import { CELL, ZONES } from '../sim/forest';
 
 export interface Ghost extends Placement { kind: MachineKind; angle: number; flip: boolean; power: number; moveId?: number }
 export type Selection = { type: 'machine' | 'cloud' | 'pipe'; id: number };
@@ -71,7 +72,7 @@ export class Renderer {
   private tmp = { x: 0, y: 0 };
   private time = 0;
   /** smoothed atmosphere */
-  mood = { storm: 0, health: 0, flash: 0 };
+  mood = { storm: 0, health: 0, flash: 0, veil: 0, sun: 0 };
   shake = 0;
   rainVisible = 0;
   onThunder: ((dist: number, big: boolean) => void) | null = null;
@@ -81,6 +82,7 @@ export class Renderer {
   private cMouth = 0;
   private cBlink = 3;
   private cZ = 0;
+  private risenAt = -1;
 
   constructor(public canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
@@ -98,6 +100,9 @@ export class Renderer {
     if (e.type === 'firstRain') this.shake = Math.max(this.shake, 0.5);
     if (e.type === 'uproot') { this.shake = Math.max(this.shake, 0.8); this.burst(e.x, e.y - 20, 18, 1); this.burst(e.x, e.y - 10, 6, 3); this.ghostsDebris.push({ x: e.x, y: e.y, t: 0 }); }
     if (e.type === 'stageUp') this.mood.flash = Math.max(this.mood.flash, 0.7);
+    if (e.type === 'awaken') { this.mood.flash = 1; this.shake = 1; this.cSize = 0.35; this.risenAt = this.time; }
+    if (e.type === 'sprout') this.burst(e.x, e.y - 8 - e.tier * 8, 3 + e.tier * 3, 0);
+    if (e.type === 'mother') this.mood.flash = Math.max(this.mood.flash, 0.4);
   }
 
   // ───────────────────────── frame ─────────────────────────
@@ -151,8 +156,12 @@ export class Renderer {
 
   // ───────────────────────── atmosphere ─────────────────────────
   private updateMood(sim: Sim, cam: Camera, dt: number) {
-    const b = sim.biome;
-    const health = smoothstep(b.humidity.start, b.humidity.target, sim.climate.humidity);
+    const health = this.healthOf(sim);
+    // the Véu: thickens during a pulse, tears open as the Ancient grows (fully at its final form)
+    const cr = sim.creature;
+    const sun = sim.climate.won ? 1 : cr.awake ? 0.12 * cr.stage : 0;
+    this.mood.veil += ((sim.veilLeft > 0 ? 1 : 0) - this.mood.veil) * Math.min(1, dt * 0.8);
+    this.mood.sun += (sun - this.mood.sun) * Math.min(1, dt * 0.4);
     let cover = 0;
     const x0 = cam.left, x1 = cam.left + cam.viewW;
     for (const cl of sim.clouds.clouds) {
@@ -167,26 +176,37 @@ export class Renderer {
     this.mood.flash = Math.max(0, this.mood.flash - dt * 5);
   }
 
+  /** how alive the land looks: mostly the forest, a little the air's humidity */
+  private healthOf(sim: Sim) {
+    const b = sim.biome;
+    const hum = smoothstep(b.humidity.start, b.humidity.target, sim.climate.humidity);
+    const forest = clamp(sim.forest.vitality / b.forest.awaken, 0, 1);
+    return clamp(0.3 * hum + 0.7 * forest, 0, 1);
+  }
+
   private ensureWorld(sim: Sim) {
     const key = sim.biome.id + ':' + sim.biomeIndex;
     if (this.builtFor === key) return;
     this.builtFor = key;
     const b = sim.biome, T = sim.terrain, r = rng(b.hills.seed * 97 + 13);
-    this.mood.health = smoothstep(b.humidity.start, b.humidity.target, sim.climate.humidity);
+    this.mood.health = this.healthOf(sim);
+    this.mood.sun = sim.climate.won ? 1 : 0;
     this.plants = [];
-    const lo = b.humidity.start + 2, hi = b.humidity.target + 4;
-    for (let x = b.targetStart - 140; x < b.targetEnd + 140; x += 6 + r() * 8) {
+    // each plant appears when the forest cell under it reaches its life threshold (1 grass, 2 bush, 3 tree)
+    const F = sim.forest;
+    for (let x = F.x0 - 120; x < F.x1 + 120; x += 6 + r() * 7) {
       const v = r();
-      const kind: Plant['kind'] = v < 0.08 ? 'tree' : v < 0.2 ? 'bush' : v < 0.3 ? 'flower' : 'grass';
-      if (x > T.pond.x0 + 10 && x < T.pond.x1 - 10 && kind !== 'grass') continue;
-      this.plants.push({ x, kind, th: lerp(lo, hi, Math.pow(r(), 0.9)), s: 0.7 + r() * 0.6, h: r(), g: 0 });
+      const kind: Plant['kind'] = v < 0.11 ? 'tree' : v < 0.27 ? 'bush' : v < 0.38 ? 'flower' : 'grass';
+      if (Math.abs(x - F.heartX) < 34 && kind !== 'grass') continue; // room for the Semente-Mãe
+      const th = kind === 'grass' ? 0.05 + r() * 0.9 : kind === 'flower' ? 0.6 + r() * 0.9 : kind === 'bush' ? 1.05 + r() * 0.9 : 2.0 + r() * 0.95;
+      this.plants.push({ x, kind, th, s: 0.7 + r() * 0.6, h: r(), g: 0 });
     }
     for (let x = 20; x < b.factoryEnd; x += 30 + r() * 70) {
       if (x < T.sea.x1 + 40) continue;
       this.plants.push({ x, kind: 'grass', th: -100, s: 0.5 + r() * 0.4, h: r(), g: 1 });
     }
     this.plants.sort((a, c) => a.x - c.x);
-    for (const p of this.plants) if (p.th > -100) p.g = smoothstep(p.th - 3, p.th + 9, sim.climate.humidity);
+    for (const p of this.plants) if (p.th > -100) p.g = smoothstep(p.th - 0.1, p.th + 0.4, F.lifeAt(p.x));
     const d: Decor[] = [];
     const add = (kind: DecorKind, x: number, s = 1) => d.push({ kind, x, s, seed: r() * 1e6, flip: r() < 0.5, a: r() * 6 });
     const L = T.sea;
@@ -243,8 +263,13 @@ export class Renderer {
     const z = cam.zoom, top = cam.top, left = cam.left;
     const st = this.mood.storm, he = this.mood.health;
     const viewTarget = clamp((Math.min(left + cam.viewW, b.targetEnd) - Math.max(left, b.targetStart)) / cam.viewW, 0, 1);
-    const skyH = he * (0.55 + 0.45 * viewTarget);
+    const sun = this.mood.sun, veil = this.mood.veil;
+    const skyH = Math.max(he * (0.55 + 0.45 * viewTarget), sun);
     let sTop = mixC(hex(p.dryTop), hex(p.skyTop), skyH), sBot = mixC(hex(p.dryBottom), hex(p.skyBottom), skyH);
+    // the Véu: ash-brown when it thickens, a warm clear sky where it has torn open
+    sTop = mixC(sTop, [38, 30, 30], veil * 0.55);
+    sBot = mixC(sBot, [72, 58, 50], veil * 0.5);
+    sBot = mixC(sBot, [236, 200, 150], sun * 0.35);
     sTop = mixC(sTop, STORM_TOP, st * 0.8);
     sBot = mixC(sBot, STORM_BOT, st * 0.75);
     const haze = mixC(hex(p.haze), sBot, 0.4 + skyH * 0.4);
@@ -252,9 +277,9 @@ export class Renderer {
     const midC = mixC(hex(p.nearHills), STORM_TOP, st * 0.35);
     const fogC = mixC(haze, hex(p.glow), 0.18);
     // pale moon behind the storm
-    const sunX = W * 0.78, sunY = H * 0.16, sunR = Math.max(5, Math.min(W, H) * 0.035);
-    const sunC: RGB = mixC([236, 228, 210], [250, 246, 230], skyH);
-    const sunA = (1 - st * 0.95) * 0.95;
+    const sunX = W * 0.78, sunY = H * 0.16, sunR = Math.max(5, Math.min(W, H) * (0.035 + 0.02 * this.mood.sun));
+    const sunC: RGB = mixC(mixC([236, 228, 210], [250, 246, 230], skyH), [255, 226, 150], sun);
+    const sunA = (1 - st * 0.95) * 0.95 * (1 - veil * 0.7);
     const glowR = sunR * 4;
     const glowC = hex(p.glow);
     const glowK = (1 - st * 0.85) * (0.85 - 0.45 * skyH);
@@ -284,8 +309,7 @@ export class Renderer {
       const gy = T.groundY(wx);
       const syG = Math.round((gy - top) * z);
       const wet = sim.wet[clamp(Math.floor(wx / 16), 0, sim.wet.length - 1)] ?? 0;
-      const edge = smoothstep(b.targetStart - 160, b.targetStart + 60, wx) * (1 - smoothstep(b.targetEnd - 60, b.targetEnd + 160, wx));
-      const green = Math.max(edge * he, wet * 0.4, wx < b.factoryEnd ? 0.12 : 0);
+      const green = Math.max(Math.min(1, sim.forest.lifeAt(wx) * 0.45), wet * 0.4, wx < b.factoryEnd ? 0.12 : 0);
       const n = hash1(Math.floor(wx / 5), 3) * 0.14 - 0.07;
       const high = b.groundBase - gy;
       const isRock = high > 140;
@@ -398,6 +422,7 @@ export class Renderer {
     const c = this.ctx, b = sim.biome;
     const ok = sim.climate.humidity >= b.humidity.target;
     const [z0, z1] = sim.targetRange();
+    const [r0, r1] = sim.regionRange();
     const g = c.createLinearGradient(0, cam.top, 0, b.groundBase);
     g.addColorStop(0, 'rgba(120,200,255,0)');
     g.addColorStop(1, ok ? 'rgba(140,255,170,0.10)' : 'rgba(120,190,255,0.07)');
@@ -413,7 +438,15 @@ export class Renderer {
       c.stroke();
       c.setLineDash([]);
     }
-    for (const x of [z0, z1]) {
+    // stakes between the parcels of land
+    for (let k = 1; k < ZONES; k++) {
+      const [a] = sim.forest.zoneRange(k);
+      const x = r0 + a * CELL, gy = sim.terrain.groundY(x);
+      if (x < cam.left - 20 || x > cam.left + cam.viewW + 20) continue;
+      c.fillStyle = '#2a1c12'; c.fillRect(x - 2, gy - 26, 4, 26);
+      c.fillStyle = sim.forest.zoneVitality(k - 1) >= b.forest.awaken ? '#7ac04a' : '#c8a060'; c.fillRect(x - 4, gy - 30, 8, 5);
+    }
+    for (const x of [r0, r1]) {
       const gy = sim.terrain.groundY(x);
       c.fillStyle = '#2a1c12'; c.fillRect(x - 3, gy - 74, 6, 74);
       c.fillStyle = '#4a3220'; c.fillRect(x - 2, gy - 74, 3, 74);
@@ -641,19 +674,19 @@ export class Renderer {
   }
 
   private drawVegetation(sim: Sim, cam: Camera, dt: number) {
-    const c = this.ctx, p = sim.biome.palette, H = sim.climate.humidity;
+    const c = this.ctx, p = sim.biome.palette;
     const gd = hex(p.grassDry), gw = hex(p.grassWet);
     const x0 = cam.left - 80, x1 = cam.left + cam.viewW + 80;
     const veg = sim.biome.vegetation;
     for (const pl of this.plants) {
       if (pl.th > -100) {
-        const target = smoothstep(pl.th - 3, pl.th + 9, H);
+        const target = smoothstep(pl.th - 0.1, pl.th + 0.4, sim.forest.lifeAt(pl.x));
         const before = pl.g;
         pl.g += (target - pl.g) * Math.min(1, dt * 1.5);
         if (before < 0.5 && pl.g >= 0.5 && pl.kind !== 'grass' && pl.x > x0 && pl.x < x1) this.burst(pl.x, sim.terrain.groundY(pl.x) - 20, 7, 0);
       }
       if (pl.x < x0 || pl.x > x1) continue;
-      if (pl.kind !== 'grass' && pl.x > sim.creature.geometry(this.cSize).headX - 10 && pl.x < sim.creature.anchor + 20) continue;
+      if (sim.creature.awake && pl.kind !== 'grass' && pl.x > sim.creature.geometry(this.cSize).headX - 10 && pl.x < sim.creature.anchor + 20) continue;
       const gy = sim.terrain.groundY(pl.x);
       const g = pl.th <= -100 ? 0.35 : pl.g;
       const sway = Math.sin(this.time * 1.7 + pl.x * 0.05) * 1.5 * g;
@@ -725,6 +758,12 @@ export class Renderer {
   /** The Ancient: an immobile colossus of stone, roots and moss that drinks the rain. */
   private drawCreature(sim: Sim, cam: Camera, dt: number, t: number) {
     const cr = sim.creature, def = cr.def, skin = def.skin;
+    if (!cr.awake) { this.drawMotherSeed(sim, cam, t); return; }
+    // rising out of the forest: leaves and earth burst around it for a few seconds
+    if (this.risenAt >= 0 && this.time - this.risenAt < 4 && this.rand() < 0.6) {
+      const g0 = cr.geometry(this.cSize);
+      this.burst(g0.cx + (this.rand() - 0.5) * g0.rx * 2.4, sim.terrain.groundY(g0.cx) - this.rand() * g0.ry, 2, this.rand() < 0.7 ? 0 : 1);
+    }
     const want = cr.scale;
     this.cSize += (want - this.cSize) * Math.min(1, dt * 0.8);
     const s = this.cSize;
@@ -898,6 +937,55 @@ export class Renderer {
     if (mood === 'euphoric' && this.rand() < dt * 2) this.burst(cx + (this.rand() - 0.3) * 120 * s, gy - 70 * s, 2, 0);
   }
 
+  /** Before the Ancient rises: the Semente-Mãe, half buried, cracked and glowing, sprouting the heart tree. */
+  private drawMotherSeed(sim: Sim, cam: Camera, t: number) {
+    const F = sim.forest, x = F.heartX, gy = sim.terrain.groundY(x);
+    const L = F.heartLife, wet = Math.min(1, F.moistAt(x));
+    const h = L > 0.02 ? 6 + 64 * Math.min(1, L / 3) : 0;
+    this.creatureHead = { x, y: gy - 46 - h };
+    if (x < cam.left - 120 || x > cam.left + cam.viewW + 120) return;
+    const c = this.ctx;
+    const pulse = 0.5 + 0.5 * Math.sin(t * (1.2 + wet * 1.5));
+    // roots reaching into the soil, longer as the forest lives
+    c.strokeStyle = '#2a1c14'; c.lineWidth = 3;
+    const reach = 20 + 90 * clamp(F.vitality / sim.biome.forest.awaken, 0, 1);
+    c.beginPath();
+    for (const dir of [-1, 1]) for (const k of [0.5, 1]) { c.moveTo(x + dir * 10, gy + 2); c.quadraticCurveTo(x + dir * reach * 0.5 * k, gy + 10 * k, x + dir * reach * k, gy + 4 + 6 * k); }
+    c.stroke();
+    // the shell, half buried
+    c.fillStyle = '#1c120c'; c.beginPath(); c.ellipse(x, gy - 3, 25, 17, -0.15, Math.PI, Math.PI * 2); c.fill();
+    c.fillStyle = '#5a3a22'; c.beginPath(); c.ellipse(x, gy - 3, 23, 15, -0.15, Math.PI, Math.PI * 2); c.fill();
+    c.fillStyle = '#7a5434'; c.beginPath(); c.ellipse(x - 7, gy - 10, 10, 5, -0.4, Math.PI, Math.PI * 2); c.fill();
+    // glowing cracks (brighter when the soil is wet)
+    const glow = 0.35 + 0.55 * pulse * (0.3 + 0.7 * wet);
+    c.strokeStyle = `rgba(255,${(170 + 60 * wet) | 0},90,${glow})`; c.lineWidth = 1.8;
+    c.beginPath(); c.moveTo(x - 12, gy - 4); c.lineTo(x - 6, gy - 11); c.lineTo(x - 1, gy - 7); c.lineTo(x + 5, gy - 15); c.moveTo(x + 9, gy - 3); c.lineTo(x + 13, gy - 9); c.stroke();
+    this.lights.push({ x, y: gy - 10, r: 50 + 30 * pulse * wet, col: '255,190,110', a: 0.45 + 0.25 * wet });
+    if (h <= 0) return;
+    // the heart sprout: a stem that becomes a trunk, leaves that become a crown
+    const g = Math.min(1, L / 3);
+    const sway = Math.sin(t * 1.4) * 1.5 * g;
+    c.fillStyle = L > 2 ? '#3a2618' : '#4f8a3a';
+    const tw = 2 + 6 * g;
+    c.fillRect(x + 2 - tw / 2, gy - 10 - h, tw, h);
+    const leaf = mixC(hex(sim.biome.palette.grassDry), hex(sim.biome.palette.grassWet), 0.4 + 0.6 * g);
+    c.fillStyle = css(leaf);
+    if (L < 1.4) {
+      const r = 3 + 5 * g;
+      c.beginPath(); c.ellipse(x + 2 - r + sway, gy - 10 - h, r, r * 0.5, -0.5, 0, 7); c.ellipse(x + 2 + r + sway, gy - 12 - h, r, r * 0.5, 0.5, 0, 7); c.fill();
+    } else {
+      const cr = 10 + 30 * g;
+      c.fillStyle = css(mul(leaf, 0.7));
+      c.beginPath(); c.arc(x + 2 + sway, gy - 8 - h, cr, 0, 7); c.fill();
+      c.fillStyle = css(leaf);
+      c.beginPath(); c.arc(x + 2 + sway, gy - 12 - h, cr * 0.85, 0, 7); c.arc(x - cr * 0.6 + sway, gy - 4 - h, cr * 0.55, 0, 7); c.arc(x + cr * 0.7 + sway, gy - 5 - h, cr * 0.55, 0, 7); c.fill();
+      // the heart glows through the crown
+      c.fillStyle = `rgba(255,220,140,${0.2 + 0.25 * pulse})`;
+      c.beginPath(); c.arc(x + 2 + sway, gy - 10 - h, cr * 0.3, 0, 7); c.fill();
+      this.lights.push({ x, y: gy - 10 - h, r: cr * 2, col: '220,255,160', a: 0.3 * g });
+    }
+  }
+
   /** roots creeping over the ground towards the factory, and the warning line for the next stage */
   private drawRoots(sim: Sim, cam: Camera, geo: { cx: number; rx: number; rootX: number; scale: number }, t: number) {
     const c = this.ctx, cr = sim.creature;
@@ -972,14 +1060,14 @@ export class Renderer {
       c.strokeStyle = sel ? '#ffe066' : '#140e0a';
       c.lineWidth = sel ? 11 : 9;
       c.stroke();
-      c.strokeStyle = p.fluid === 'water' ? '#6a5a4a' : '#7d6a5a';
+      c.strokeStyle = p.fluid === 'water' ? '#6a5a4a' : p.fluid === 'seed' ? '#5e6238' : '#7d6a5a';
       c.lineWidth = 6;
       c.stroke();
-      c.strokeStyle = p.fluid === 'water' ? 'rgba(120,190,230,0.35)' : 'rgba(255,240,220,0.25)';
+      c.strokeStyle = p.fluid === 'water' ? 'rgba(120,190,230,0.35)' : p.fluid === 'seed' ? 'rgba(200,230,110,0.35)' : 'rgba(255,240,220,0.25)';
       c.lineWidth = 2;
       c.stroke();
       if (p.flow > 0.02) {
-        c.strokeStyle = p.fluid === 'water' ? C.waterL : '#ffffff';
+        c.strokeStyle = p.fluid === 'water' ? C.waterL : p.fluid === 'seed' ? '#d8f07a' : '#ffffff';
         c.lineWidth = 2.5;
         c.setLineDash([5, 11]);
         c.lineDashOffset = -p.phase * 3;
@@ -1008,9 +1096,12 @@ export class Renderer {
       const jitter = m.boost > 0.05 ? Math.sin(t * 50) * 1.2 : 0;
       c.save();
       c.translate(jitter, 0);
+      const kc = sim.mods.seedCap(m.kind);
       drawMachine(c, m, {
-        t, waterFrac: wc ? m.water / wc : 0, steamFrac: sc ? m.steam / sc : 0,
-        active: m.rate > 0.05 || (m.kind === 'pump' || m.kind === 'pump_hp' ? sim.isPumpValid(m) && m.water < wc - 0.01 : false),
+        t, waterFrac: wc ? m.water / wc : 0, steamFrac: sc ? m.steam / sc : 0, seedFrac: kc ? m.seeds / kc : 0,
+        active: m.rate > (m.kind === 'greenhouse' || m.kind === 'seeder' ? 0.01 : 0.05)
+          || (m.kind === 'pump' || m.kind === 'pump_hp' ? sim.isPumpValid(m) && m.water < wc - 0.01 : false)
+          || (m.kind === 'compost' && sim.forest.vitality > 0.05),
       }, groundAt);
       c.restore();
       m.anim = Math.max(0, m.anim - 0.02);
@@ -1039,6 +1130,8 @@ export class Renderer {
     }
     if (m.kind === 'boiler_ind' && m.heat > 0.1) this.lights.push({ x: m.x, y: m.y - 8, r: 70 * m.heat * fl + 10, col: '120,170,255', a: 0.6 });
     if (m.kind === 'condenser' && m.rate > 0.05) this.lights.push({ x: m.x, y: m.y - 55, r: 60, col: '120,220,255', a: 0.45 });
+    if (m.kind === 'greenhouse' && m.rate > 0.01) this.lights.push({ x: m.x, y: m.y - 34, r: 60, col: '170,255,140', a: 0.45 });
+    if (m.kind === 'seeder' && m.rate > 0.01) this.lights.push({ x: m.x, y: m.y - 58, r: 36, col: '240,230,140', a: 0.5 });
     if (m.kind === 'divider' && m.on) this.lights.push({ x: m.x, y: m.y - 50, r: 50, col: '190,140,255', a: 0.5 });
     if ((m.kind === 'pump' || m.kind === 'pump_hp') && m.on) this.lights.push({ x: m.x + 7, y: m.y - 28, r: 16, col: '120,255,150', a: 0.35 });
   }
@@ -1247,6 +1340,7 @@ export class Renderer {
       if (k === 0) { this.bvy[i] += 60 * dt; this.bvx[i] *= 1 - dt; }
       else if (k === 2) { this.bvx[i] += (this.rand() - 0.5) * 30 * dt; this.bvy[i] += (this.rand() - 0.5) * 30 * dt; }
       else if (k === 3) this.bvy[i] -= 20 * dt;
+      else if (k === 4) { this.bvx[i] += Math.sin(this.bl[i] * 5 + i) * 20 * dt; if (this.by[i] > sim.terrain.groundY(this.bx[i])) this.bl[i] = 0; }
       this.bx[i] += this.bvx[i] * dt; this.by[i] += this.bvy[i] * dt;
       if (this.bl[i] <= 0) {
         this.bn--;
@@ -1265,7 +1359,8 @@ export class Renderer {
         const a = 0.5 + 0.5 * Math.sin(this.bl[i] * 6 + i);
         c.fillStyle = `rgba(230,255,140,${a})`; c.fillRect(this.bx[i], this.by[i], 2, 2);
         if (a > 0.6) this.lights.push({ x: this.bx[i], y: this.by[i], r: 10, col: '200,255,120', a: 0.4 * a });
-      } else { c.fillStyle = `rgba(255,${(150 + this.bl[i] * 100) | 0},60,${this.bl[i]})`; c.fillRect(this.bx[i], this.by[i], 2, 2); }
+      } else if (k === 4) { c.fillStyle = '#e8d27a'; c.fillRect(this.bx[i] - 1, this.by[i] - 1, 3, 2); c.fillStyle = '#7a5a2a'; c.fillRect(this.bx[i] - 1, this.by[i] + 1, 3, 1); }
+      else { c.fillStyle = `rgba(255,${(150 + this.bl[i] * 100) | 0},60,${this.bl[i]})`; c.fillRect(this.bx[i], this.by[i], 2, 2); }
     }
   }
 
@@ -1278,6 +1373,11 @@ export class Renderer {
       const r = cloudRadius(cl.mass);
       if (cl.x + r < x0 || cl.x - r > x1) continue;
       visibleRain += cl.rainRate;
+      if (cl.seeds > 0.3 && this.rand() < dt * Math.min(8, 1 + cl.seeds * 0.5) && this.bn < MAX_BITS) {
+        const i = this.bn++;
+        this.bx[i] = cl.x + (this.rand() * 2 - 1) * r * 0.6; this.by[i] = cl.y + r * 0.2;
+        this.bvx[i] = (this.rand() - 0.5) * 10; this.bvy[i] = 40 + this.rand() * 30; this.bl[i] = 6; this.bk[i] = 4;
+      }
       sim.wind.at(cl.x, cl.y, sim.time, this.tmp);
       const n = Math.min(90, (cl.rainRate * 40 + r * 0.6) * dt * lod);
       let k = Math.floor(n) + (this.rand() < n % 1 ? 1 : 0);
@@ -1364,7 +1464,14 @@ export class Renderer {
         c.fillStyle = g;
         c.fillRect(cl.x - r * 0.72, cl.y, r * 1.44, gy - cl.y);
       }
+      if (cl.mother) {
+        const a = 0.25 + 0.15 * Math.sin(t * 3);
+        c.fillStyle = `rgba(255,220,130,${a * 0.5})`;
+        c.beginPath(); c.ellipse(cl.x, cl.y, r * 1.35, r * 0.85, 0, 0, 7); c.fill();
+        this.lights.push({ x: cl.x, y: cl.y, r: r * 1.6, col: '255,210,120', a: 0.4 });
+      }
       this.drawCloudShape(cl, r, sat, cam, t);
+      if (cl.seeds > 0.4) this.drawCloudSeeds(cl, r, t);
       if (cl.held) {
         c.strokeStyle = 'rgba(255,230,160,0.85)';
         c.lineWidth = (2 / cam.zoom) * cam.scale * 1.5;
@@ -1378,6 +1485,19 @@ export class Renderer {
         c.setLineDash([]);
         c.beginPath(); c.moveTo(cl.x, cl.y); c.lineTo(cl.x + cl.vx * 1.5, cl.y + cl.vy * 1.5); c.stroke();
       }
+    }
+  }
+
+  /** golden specks: the seeds a cloud carries */
+  private drawCloudSeeds(cl: Cloud, r: number, t: number) {
+    const c = this.ctx;
+    const n = Math.min(16, Math.ceil(cl.seeds / 2));
+    const q = rng(cl.seed + 3);
+    for (let i = 0; i < n; i++) {
+      const a = q() * Math.PI * 2, d = Math.sqrt(q()) * 0.7;
+      const x = cl.x + Math.cos(a + t * 0.3) * d * r, y = cl.y + Math.sin(a) * d * r * 0.4 + Math.sin(t * 2 + i) * 2;
+      c.fillStyle = i % 3 ? '#e8d27a' : '#a8d860';
+      c.fillRect(x - 1.5, y - 1, 3, 2.5);
     }
   }
 
@@ -1491,7 +1611,7 @@ export class Renderer {
   private drawLighting(cam: Camera) {
     const c = this.ctx, l = this.lctx;
     const st = this.mood.storm, he = this.mood.health;
-    const dark = clamp((0.2 + 0.12 * (1 - he) + st * 0.38) * (1 - this.mood.flash * 0.9), 0, 0.78);
+    const dark = clamp((0.2 + 0.12 * (1 - he) + st * 0.38 + this.mood.veil * 0.14) * (1 - this.mood.flash * 0.9) * (1 - 0.55 * this.mood.sun), 0, 0.78);
     const z = cam.zoom;
     l.setTransform(1, 0, 0, 1, 0, 0);
     l.globalCompositeOperation = 'source-over';
@@ -1565,7 +1685,7 @@ export class Renderer {
     const c = this.ctx;
     const fake: Machine = {
       id: -1, kind: g.kind, x: g.x, y: g.y, angle: g.angle, flip: g.flip, on: true, power: g.power,
-      water: 0, steam: 0, heat: 0, fire: 0, emitted: 0, rate: 0, boost: 0, support: g.support, anim: 0,
+      water: 0, steam: 0, seeds: 0, heat: 0, fire: 0, emitted: 0, rate: 0, boost: 0, support: g.support, anim: 0,
     };
     c.globalAlpha = 0.75;
     drawMachine(c, fake, { t, waterFrac: 0, steamFrac: 0, active: true, ghost: true }, x => sim.terrain.groundY(x));
@@ -1588,7 +1708,7 @@ export function drawIcon(canvas: HTMLCanvasElement, kind: MachineKind) {
   const d = MACHINES[kind];
   c.clearRect(0, 0, canvas.width, canvas.height);
   c.imageSmoothingEnabled = false;
-  const extra = d.kind === 'boiler' ? 30 : d.kind === 'boiler_ind' ? 32 : d.kind === 'condenser' ? 10 : 0;
+  const extra = d.kind === 'boiler' ? 30 : d.kind === 'boiler_ind' ? 32 : d.kind === 'condenser' ? 10 : d.kind === 'seeder' ? 8 : 0;
   const s = Math.min((canvas.width - 6) / (d.w + 4), (canvas.height - 6) / (d.h + extra + 4));
   c.save();
   if (d.placement === 'mast') {
@@ -1598,7 +1718,7 @@ export function drawIcon(canvas: HTMLCanvasElement, kind: MachineKind) {
   } else {
     c.translate(canvas.width / 2, canvas.height - 3);
     c.scale(s, s);
-    const fake: Machine = { id: 0, kind, x: 0, y: 0, angle: 0, flip: false, on: true, power: 1, water: 0, steam: 0, heat: 0.6, fire: 1, emitted: 0, rate: 0, boost: 0, support: 0, anim: 0 };
+    const fake: Machine = { id: 0, kind, x: 0, y: 0, angle: 0, flip: false, on: true, power: 1, water: 0, steam: 0, seeds: 0, heat: 0.6, fire: 1, emitted: 0, rate: 0, boost: 0, support: 0, anim: 0 };
     drawMachine(c, fake, { t: 0.4, waterFrac: 0.6, steamFrac: 0.4, active: true });
   }
   c.restore();

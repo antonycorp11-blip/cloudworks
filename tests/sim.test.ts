@@ -11,6 +11,8 @@ const researched = (lvl = 0) => { const s = new Sim(lvl); for (const n of TREE) 
 const run = (s: Sim, seconds: number) => { for (let i = 0; i < seconds / STEP; i++) s.step(); };
 const boilerOf = (s: Sim) => s.machines.find(m => m.kind === 'boiler')!;
 const fanOf = (s: Sim) => s.machines.find(m => m.kind === 'fan')!;
+/** skip the forest phase: the Ancient rises right away */
+const rise = (s: Sim) => { s.creature.rise('…'); return s; };
 
 class MemStore {
   m = new Map<string, string>();
@@ -63,9 +65,9 @@ describe('manual cycle: water → steam → cloud → rain → humidity → cred
     const control = new Sim(0);
     run(control, t + 20);
     expect(h0).toBeGreaterThan(0);
-    expect(s.climate.humidity).toBeGreaterThan(control.climate.humidity + 1);
-    expect(s.creature.awake).toBe(true);
-    expect(s.creature.growth).toBeGreaterThan(0.3);
+    expect(s.climate.humidity).toBeGreaterThan(control.climate.humidity + 0.3);
+    expect(s.forest.meanMoist).toBeGreaterThan(control.forest.meanMoist);
+    expect(s.creature.awake).toBe(false); // rain alone doesn't wake it: the forest has to grow first
     expect(s.credits).toBeGreaterThan(c0);
   });
 });
@@ -297,23 +299,115 @@ describe('missions', () => {
   });
 });
 
+describe('the forest', () => {
+  const above = (s: Sim, x: number, mass: number, seeds = 0) => { const c = s.clouds.spawn(x, s.biome.groundBase - 380, mass); c.seeds = seeds; return c; };
+  it('rain without seeds only wets the dust; seeded rain makes the land sprout', () => {
+    const dry = new Sim(0), seeded = new Sim(0);
+    const x = dry.forest.x0 + 200;
+    for (let i = 0; i < 6; i++) { above(dry, x, 10); above(seeded, x, 10, 12); run(dry, 8); run(seeded, 8); }
+    expect(dry.forest.meanMoist).toBeGreaterThan(0);
+    expect(dry.forest.sprouted).toBe(false);
+    expect(seeded.forest.sprouted).toBe(true);
+    expect(seeded.forest.lifeAt(x)).toBeGreaterThan(0.5);
+    expect(seeded.stats.seedsRained).toBeGreaterThan(30);
+  });
+  it('the Semente-Mãe sprouts with water alone but needs a living forest to become a tree', () => {
+    const s = new Sim(0);
+    for (let i = 0; i < 40; i++) { above(s, s.forest.heartX, 8); run(s, 8); }
+    expect(s.forest.heartLife).toBeGreaterThan(0.5);
+    expect(s.forest.heartLife).toBeLessThan(2);
+  });
+  it('the hand pouch seeds a cloud and refills slowly', () => {
+    const s = new Sim(0);
+    const c = above(s, 900, 4);
+    const p0 = s.pouch;
+    expect(s.seedByHand(c.id).ok).toBe(true);
+    expect(c.seeds).toBeGreaterThan(0);
+    expect(s.pouch).toBeLessThan(p0);
+    run(s, 25);
+    expect(s.pouch).toBeGreaterThan(p0 - 6);
+  });
+  it('plants wilt when the soil stays dry', () => {
+    const s = new Sim(0);
+    s.forest.life.fill(1.5);
+    s.forest.moist.fill(0);
+    run(s, 120);
+    expect(s.forest.vitality).toBeLessThan(0.5);
+  });
+  it('the Ancient rises when the land is alive and the heart is a tree', () => {
+    const s = new Sim(0);
+    let risen = false;
+    s.bus.on(e => { if (e.type === 'awaken') risen = true; });
+    s.forest.life.fill(s.biome.forest.awaken * 3 + 0.05);
+    s.forest.life[s.forest.heart] = 3;
+    s.forest.moist.fill(1);
+    s.step();
+    expect(risen).toBe(true);
+    expect(s.creature.awake).toBe(true);
+    expect(s.creature.stage).toBe(1);
+  });
+});
+
+describe('the seed line', () => {
+  it('a greenhouse turns steam and water into seeds — and that steam no longer becomes clouds', () => {
+    const s = researched();
+    s.credits = 1e4;
+    const b = boilerOf(s);
+    const gh = s.build('greenhouse', 480, s.biome.groundBase).machine!;
+    expect(gh).toBeTruthy();
+    expect(s.connect({ m: b.id, port: 'out' }, { m: gh.id, port: 'steam' }).ok).toBe(true);
+    gh.water = 20;
+    b.water = 20;
+    s.stoke(b);
+    run(s, 40);
+    expect(s.stats.seedsMade).toBeGreaterThan(3);
+    expect(gh.seeds).toBeGreaterThan(3);
+    expect(s.stats.formed).toBeLessThan(0.5); // the boiler's steam went into the greenhouse
+  });
+  it('a seeder shoots its seeds into the cloud above it', () => {
+    const s = researched();
+    s.credits = 1e4;
+    const sd = s.build('seeder', 880, s.biome.groundBase).machine!;
+    expect(sd).toBeTruthy();
+    sd.seeds = 10;
+    const c = s.clouds.spawn(880, s.biome.groundBase - 330, 6);
+    c.vx = 0;
+    s.step();
+    expect(c.seeds).toBeGreaterThan(0);
+    run(s, 4);
+    expect(sd.seeds).toBeLessThan(10);
+  });
+  it('seeds travel through pipes from the greenhouse to the seeder', () => {
+    const s = researched();
+    s.credits = 1e4;
+    const gh = s.build('greenhouse', 480, s.biome.groundBase).machine!;
+    const sd = s.build('seeder', 880, s.biome.groundBase).machine!;
+    expect(s.connect({ m: gh.id, port: 'out' }, { m: sd.id, port: 'in' }).ok).toBe(true);
+    gh.seeds = 10;
+    run(s, 2);
+    expect(sd.seeds + s.stats.seedsShot).toBeGreaterThan(2);
+  });
+});
+
 describe('the Ancient', () => {
-  it('sleeps until rain, grows in stages and gets thirstier', () => {
+  it('only grows once risen, in stages, and gets thirstier', () => {
     const s = new Sim(0);
     expect(s.creature.mood).toBe('sleeping');
-    const cx = (s.biome.targetStart + s.biome.targetEnd) / 2;
+    s.creature.feed(500, 60);
+    expect(s.creature.growth).toBe(0);
+    rise(s);
+    const cx = s.creature.geometry().cx;
     const thirst0 = s.creature.thirst;
-    for (let i = 0; i < 30; i++) { s.clouds.spawn(cx, s.biome.groundBase - 380, 10); run(s, 6); }
-    expect(s.creature.awake).toBe(true);
+    for (let i = 0; i < 40; i++) { s.clouds.spawn(cx, s.biome.groundBase - 380, 30); run(s, 6); }
     expect(s.creature.stage).toBeGreaterThanOrEqual(2);
     expect(s.creature.thirst).toBeGreaterThan(thirst0);
   });
   it('reaching the final form completes the level', () => {
-    const s = new Sim(0);
+    const s = rise(new Sim(0));
     let won = false;
     s.bus.on(e => { if (e.type === 'levelComplete') won = true; });
     s.climate.humidity = 60;
-    s.creature.feed(5000, 60);
+    s.creature.feed(1e5, 60);
     s.step();
     expect(s.creature.done).toBe(true);
     expect(won).toBe(true);
@@ -380,7 +474,7 @@ describe('engineering tree', () => {
   });
   it('creature perks change growth', () => {
     const grow = (lvl: number) => {
-      const s = new Sim(0);
+      const s = rise(new Sim(0));
       s.mods.levels.rootDepth = lvl;
       s.step();
       s.creature.feed(20, 40);
@@ -392,25 +486,25 @@ describe('engineering tree', () => {
 
 describe('the Ancient grows into the factory', () => {
   it('its roots uproot machines in the way (refunded) and block building there', () => {
-    const s = researched();
+    const s = rise(researched());
     s.credits = 1e6;
     const y = s.biome.groundBase - s.biome.condAlt;
-    const fan = s.build('fan', 1300, y).machine!;
+    const fan = s.build('fan', 1340, y).machine!;
     expect(fan).toBeTruthy();
     const before = s.credits;
     s.climate.humidity = 60;
-    for (let i = 0; i < 12 && s.creature.stage < 3; i++) {
-      const [a] = s.targetRange();
-      s.clouds.spawn(a + 200, y, 30);
+    for (let i = 0; i < 60 && s.creature.stage < 3; i++) {
+      s.climate.humidity = 60;
+      s.clouds.spawn(s.creature.geometry().cx, y, 60);
       for (let k = 0; k < 30 * 8; k++) s.step();
     }
     expect(s.creature.stage).toBeGreaterThanOrEqual(3);
     expect(s.machines.find(m => m.id === fan.id)).toBeUndefined();
     expect(s.credits).toBeGreaterThan(before);
-    expect(s.build('fan', 1300, y).ok).toBe(false);
+    expect(s.build('fan', 1340, y).ok).toBe(false);
   });
   it('its body is an obstacle: clouds are pushed over it', () => {
-    const s = new Sim(0);
+    const s = rise(new Sim(0));
     s.creature.stage = 4;
     const g = s.creature.geometry();
     expect(s.groundAt(g.cx)).toBeLessThan(s.terrain.groundY(g.cx) - 200);

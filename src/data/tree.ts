@@ -29,7 +29,7 @@ export const BRANCHES: Record<Branch, { name: string; color: string; icon: strin
   steam: { name: 'Vapor', color: '#ff8a3a', icon: 'fire' },
   clouds: { name: 'Nuvens', color: '#cfd8ea', icon: 'cloud' },
   transport: { name: 'Transporte', color: '#7ad8c0', icon: 'wind' },
-  creature: { name: 'Criatura', color: '#9ae86a', icon: 'eye' },
+  creature: { name: 'Floresta', color: '#9ae86a', icon: 'leaf' },
   legacy: { name: 'Legado', color: '#c89cff', icon: 'star' },
 };
 
@@ -76,6 +76,14 @@ export const TREE: TreeNode[] = [
   { id: 'k_roots', name: 'Raízes profundas', desc: 'A Criatura aproveita mais cada litro: cresce mais rápido.', icon: 'leaf', branch: 'creature', x: 0.2, y: 1.5, requires: ['core'], mod: 'rootDepth' },
   { id: 'k_song', name: 'Canção da chuva', desc: 'Satisfeita, a Criatura recompensa ainda mais.', icon: 'eye', branch: 'creature', x: 1.3, y: 2.4, requires: ['k_roots'], mod: 'lullaby' },
   { id: 'k_patience', name: 'Paciência ancestral', desc: 'A sede da Criatura cresce mais devagar.', icon: 'drop', branch: 'creature', x: -0.4, y: 2.7, requires: ['k_roots'], mod: 'patience' },
+
+  // ── Floresta (lower right): the seed line ──
+  { id: 'g_estufa', name: 'Estufa', desc: 'Pesquisa: vapor e água viram sementes. Sem sementes, a chuva só molha a poeira.', icon: 'leaf', branch: 'creature', x: 2.4, y: 1.6, requires: ['core'], unlock: ['greenhouse'], cost: 35 },
+  { id: 'g_seedrate', name: 'Estufas férteis', desc: 'Estufas produzem mais sementes com o mesmo vapor.', icon: 'leaf', branch: 'creature', x: 2.7, y: 2.75, requires: ['g_estufa'], mod: 'seedRate' },
+  { id: 'g_seeder', name: 'Semeador', desc: 'Pesquisa: dispara sementes por tubo para dentro das nuvens.', icon: 'seed', branch: 'creature', x: 3.6, y: 1.8, requires: ['g_estufa'], unlock: ['seeder'], cost: 60 },
+  { id: 'g_germ', name: 'Germinação', desc: 'Sementes brotam em solo mais seco e rendem mais vida.', icon: 'drop', branch: 'creature', x: 4.6, y: 2.4, requires: ['g_seeder'], mod: 'germination' },
+  { id: 'g_pollen', name: 'Polinização', desc: 'Plantas maduras espalham sementes sozinhas — pelo chão e pelas nuvens.', icon: 'cloud', branch: 'creature', x: 4.2, y: 3.4, requires: ['g_seeder'], mod: 'pollination' },
+  { id: 'g_compost', name: 'Composteira', desc: 'Pesquisa: a floresta devolve folhas que viram adubo para as Estufas.', icon: 'tank', branch: 'creature', x: 3.1, y: 3.8, requires: ['g_seedrate'], unlock: ['compost'], cost: 160 },
 
   // ── Legado (patents, permanent) ──
   { id: 'p_credits', name: 'Investidores climáticos', desc: 'Permanente: +150 créditos iniciais por nível em cada bioma.', icon: 'coin', branch: 'legacy', x: 0.6, y: 3.9, requires: ['k_song'], perm: 'startCredits', cost: 1 },

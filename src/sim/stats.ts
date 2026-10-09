@@ -26,6 +26,7 @@ export class Mods {
       case 'valve': case 'splitter': return 3;
       case 'boiler': return 20 * (1 + this.m('boilerCap'));
       case 'boiler_ind': return 80 * (1 + this.m('boilerCap'));
+      case 'greenhouse': return 20 * (1 + this.m('storage'));
       default: return 0;
     }
   }
@@ -34,10 +35,18 @@ export class Mods {
       case 'boiler': return 6;
       case 'boiler_ind': return 16;
       case 'condenser': return 14 * (1 + this.m('storage'));
+      case 'greenhouse': return 10 * (1 + this.m('storage'));
       default: return 0;
     }
   }
-  cap(kind: MachineKind, fluid: Fluid) { return fluid === 'water' ? this.waterCap(kind) : this.steamCap(kind); }
+  seedCap(kind: MachineKind) {
+    switch (kind) {
+      case 'greenhouse': return 30 * (1 + this.m('storage'));
+      case 'seeder': return 20 * (1 + this.m('storage'));
+      default: return 0;
+    }
+  }
+  cap(kind: MachineKind, fluid: Fluid) { return fluid === 'water' ? this.waterCap(kind) : fluid === 'steam' ? this.steamCap(kind) : this.seedCap(kind); }
 
   pumpRate(kind: MachineKind) { return (kind === 'pump_hp' ? 7 : 2) * (1 + this.m('pumpRate')); }
 
@@ -50,11 +59,19 @@ export class Mods {
       case 'reservoir': return 60 * h;
       case 'valve': case 'splitter': return 200 * h;
       case 'boiler': case 'boiler_ind': return 600;
+      case 'greenhouse': return 400;
       default: return 0;
     }
   }
 
-  pipeCap(fluid: Fluid) { return (fluid === 'water' ? 4 : 8) * (1 + this.m('pipeCap')); }
+  pipeCap(fluid: Fluid) { return (fluid === 'water' ? 4 : fluid === 'steam' ? 8 : 3) * (1 + this.m('pipeCap')); }
+
+  /** Greenhouse: seeds per second at full supply, and what each seed costs */
+  seedRate() { return 0.25 * (1 + this.m('seedRate')) * this.global; }
+  static readonly STEAM_PER_SEED = 1.6;
+  static readonly WATER_PER_SEED = 0.5;
+  /** seeds per second a seeder can shoot into a cloud */
+  seederRate() { return 2; }
 
   boilerRate(kind: MachineKind) { return (kind === 'boiler_ind' ? 3.2 : 1) * (1 + this.m('boilerRate')) * this.global; }
   /** heating speed per second (fraction of full temperature) */

@@ -5,23 +5,24 @@ export type Mood = 'sleeping' | 'starving' | 'thirsty' | 'content' | 'euphoric';
 export interface CreatureDef {
   name: string;
   title: string;
-  /** cumulative effective litres needed to reach stage 1..N (last = final form) */
+  /** cumulative effective litres needed to reach stage 1..N (last = final form).
+   *  Stage 1 is reached by the forest itself (the Ancient rises from it), so needs[0] is the growth it starts with. */
   needs: number[];
   skin: { stone: string; stoneLight: string; moss: string; eye: string };
 }
 
 /** One Ancient per biome (same index as BIOMES). */
 export const CREATURES: CreatureDef[] = [
-  { name: 'Bramo', title: 'o Bebedor de Tempestades', needs: [40, 150, 380, 800, 1500], skin: { stone: '#3b3430', stoneLight: '#5a5048', moss: '#4f8a3a', eye: '#ffb347' } },
-  { name: 'Ceifa', title: 'a Guardiã dos Campos', needs: [60, 180, 400, 750, 1200], skin: { stone: '#4a3c30', stoneLight: '#6a5a46', moss: '#7aa844', eye: '#ffd36a' } },
-  { name: 'Ossudo', title: 'o Rei da Savana Seca', needs: [120, 360, 800, 1500, 2400], skin: { stone: '#5a4030', stoneLight: '#7a5a40', moss: '#94a848', eye: '#ff8a3a' } },
-  { name: 'Granito', title: 'o Pico que Dorme', needs: [200, 600, 1300, 2400, 3800], skin: { stone: '#4a4a52', stoneLight: '#6e6e78', moss: '#5a9a5a', eye: '#8ad8ff' } },
-  { name: 'Duna', title: 'a Sede sem Fim', needs: [400, 1200, 2600, 4800, 7600], skin: { stone: '#7a5a3a', stoneLight: '#a07a50', moss: '#8a9c46', eye: '#ffe06a' } },
-  { name: 'Brasa', title: 'o Coração de Cinzas', needs: [700, 2000, 4500, 8000, 12500], skin: { stone: '#2a2020', stoneLight: '#4a3632', moss: '#5c8c48', eye: '#ff5a2a' } },
+  { name: 'Bramo', title: 'o Bebedor de Tempestades', needs: [0, 550, 1450, 2900, 4800], skin: { stone: '#3b3430', stoneLight: '#5a5048', moss: '#4f8a3a', eye: '#ffb347' } },
+  { name: 'Ceifa', title: 'a Guardiã dos Campos', needs: [0, 450, 1100, 2100, 3400], skin: { stone: '#4a3c30', stoneLight: '#6a5a46', moss: '#7aa844', eye: '#ffd36a' } },
+  { name: 'Ossudo', title: 'o Rei da Savana Seca', needs: [0, 650, 1550, 2900, 4700], skin: { stone: '#5a4030', stoneLight: '#7a5a40', moss: '#94a848', eye: '#ff8a3a' } },
+  { name: 'Granito', title: 'o Pico que Dorme', needs: [0, 1000, 2350, 4250, 6700], skin: { stone: '#4a4a52', stoneLight: '#6e6e78', moss: '#5a9a5a', eye: '#8ad8ff' } },
+  { name: 'Duna', title: 'a Sede sem Fim', needs: [0, 1700, 3800, 6900, 11000], skin: { stone: '#7a5a3a', stoneLight: '#a07a50', moss: '#8a9c46', eye: '#ffe06a' } },
+  { name: 'Brasa', title: 'o Coração de Cinzas', needs: [0, 2700, 6050, 10700, 16800], skin: { stone: '#2a2020', stoneLight: '#4a3632', moss: '#5c8c48', eye: '#ff5a2a' } },
 ];
 
 export const MOOD_LABEL: Record<Mood, string> = {
-  sleeping: 'Adormecida', starving: 'Faminta', thirsty: 'Sedenta', content: 'Satisfeita', euphoric: 'Eufórica',
+  sleeping: 'Dormente', starving: 'Faminta', thirsty: 'Sedenta', content: 'Satisfeita', euphoric: 'Eufórica',
 };
 
 /** credit multiplier: a happy Ancient rewards you better */

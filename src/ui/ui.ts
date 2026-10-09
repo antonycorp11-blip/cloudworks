@@ -10,6 +10,9 @@ import { fmt } from '../sim/util';
 import { icon } from './icons';
 import { TreeView } from './tree';
 import { TREE } from '../data/tree';
+import { CHAPTERS, chapter, PREMISE } from '../data/story';
+import { ZONES } from '../sim/forest';
+import { POUCH_GIVE } from '../sim/sim';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const deg = (r: number) => Math.round((r * 180) / Math.PI);
@@ -23,6 +26,7 @@ export class UI {
   private tick = 0;
   private shopCards: { kind: MachineKind; el: HTMLElement }[] = [];
   private speech: { text: string; shown: number; life: number; angry: boolean } | null = null;
+  private risen: boolean | null = null;
   private missionId = '';
 
   constructor(private g: Game) {
@@ -59,13 +63,23 @@ export class UI {
     this.buildShop();
     this.ctxKey = '';
     this.missionId = '';
-    const d = this.g.sim.creature.def;
-    $('cr-name').textContent = d.name;
-    $('cr-title').textContent = d.title;
-    $('cr-pips').innerHTML = d.needs.map(() => '<i></i>').join('');
+    this.rebuildCreature();
     this.refreshCtx();
     this.refreshBar();
     this.refreshMenu();
+  }
+
+  /** the panel shows the Semente-Mãe and its land until the Ancient rises, then the Ancient */
+  private rebuildCreature() {
+    const s = this.g.sim, d = s.creature.def, risen = s.creature.awake;
+    this.risen = risen;
+    $('cr-name').textContent = risen ? d.name : 'Semente-Mãe';
+    $('cr-title').textContent = risen ? d.title : 'algo dorme sob a terra';
+    $('cr-tube-name').textContent = risen ? 'Saciedade' : 'Solo úmido';
+    $('cr-tube').title = risen ? 'Saciedade (umidade do destino)' : 'Umidade média do solo na terra a reflorestar';
+    $('cr-pips').innerHTML = (risen ? d.needs : Array.from({ length: ZONES })).map(() => '<i></i>').join('');
+    $('cr-pips').title = risen ? 'Estágios do Ancião' : 'Parcelas de terra que já atingiram a meta de vida';
+    $('b-target-lbl').textContent = risen ? 'Ancião' : 'Floresta';
   }
 
   // ───────────── generic ─────────────
@@ -133,6 +147,7 @@ export class UI {
       case 'float': this.float(e.x, e.y, e.text, e.color); break;
       case 'coins': this.coins(e.x, e.y, e.amount); break;
       case 'levelComplete': setTimeout(() => this.showWin(), 2200); break;
+      case 'awaken': this.rebuildCreature(); break;
       case 'firstRain': $('b-build').classList.add('pulse'); break;
       case 'mission':
         this.toast(`${icon('check', 18)} ${e.text.replace('{C}', this.g.sim.creature.def.name)} &nbsp;<b>+${fmt(e.reward)}</b>`, 'mission', true);
@@ -142,36 +157,52 @@ export class UI {
         break;
       case 'speak':
         this.speech = { text: e.text, shown: 0, life: 3 + e.text.length / 16, angry: e.mood === 'starving' || e.kind === 'missed' };
-        $('speech-name').textContent = this.g.sim.creature.def.name;
+        $('speech-name').textContent = e.who ?? this.g.sim.creature.def.name;
         $('speech-text').textContent = '';
         $('speech').classList.remove('hidden');
         $('speech').classList.toggle('angry', this.speech.angry);
+        $('speech').classList.toggle('whisper', e.kind === 'whisper');
         break;
     }
   }
 
   showIntro() {
-    const s = this.g.sim, b = s.biome, d = s.creature.def;
+    const s = this.g.sim, b = s.biome, ch = chapter(s.biomeIndex);
     $('intro-sub').textContent = `${b.subtitle} · ${b.name}`;
-    $('intro-title').textContent = `${d.name}, ${d.title}`;
-    $('intro-text').textContent = `${b.intro} A chuva que chega ao destino alimenta ${d.name}. Leve-o à forma final.`;
+    $('intro-title').textContent = ch.title;
+    $('intro-text').textContent = `${s.biomeIndex === 0 ? PREMISE + ' ' : ''}${ch.intro} ${b.intro}`;
+    $('intro-go').textContent = ch.go;
     this.paused = true;
     this.open('intro');
   }
 
+  /** the six lands and the holes already torn in the Véu */
+  private mapHtml(done: number) {
+    return CHAPTERS.map((_, i) => {
+      const b = BIOMES[i];
+      const cls = i < done ? 'done' : i === done ? 'next' : '';
+      const line = i ? `<div class="wm-line ${i < done ? 'done' : ''}"></div>` : '';
+      return `${line}<div class="wm-node ${cls}"><div class="wm-dot"></div><span>${b?.name ?? ''}</span></div>`;
+    }).join('');
+  }
+
   private showWin() {
-    const s = this.g.sim, b = s.biome, d = s.creature.def;
-    $('win-title').textContent = `${d.name} despertou por completo`;
+    const s = this.g.sim, b = s.biome, ch = chapter(s.biomeIndex);
     const next = BIOMES[s.biomeIndex + 1];
-    $('win-text').textContent = `“Agora sou grande o bastante para chamar a chuva sozinho. Vá, pequeno engenheiro. Outros como eu ainda dormem.”`;
+    const art: Record<string, string> = { forest: 'a', fields: 'os', savanna: 'a', mountains: 'as', desert: 'o', volcanic: 'a' };
+    $('win-title').textContent = next ? `O Véu se abriu sobre ${art[b.id] ?? ''} ${b.name}` : 'O céu está aberto';
+    $('win-map').innerHTML = this.mapHtml(s.biomeIndex + 1);
+    $('win-text').textContent = ch.journal;
+    $('win-handoff').textContent = ch.handoff;
     const st = s.stats;
     const t = Math.round(s.time);
     $('win-stats').innerHTML = [
       ['Tempo', `${Math.floor(t / 60)}m ${t % 60}s`], ['Chuva entregue', `${fmt(st.rainTarget)} L`],
-      ['Vapor gerado', `${fmt(st.steam)} L`], ['Fusões de nuvens', `${st.merges}`],
+      ['Vapor gerado', `${fmt(st.steam)} L`], ['Sementes plantadas', `${fmt(st.seedsRained)}`],
+      ['Vida da floresta', `${Math.round(s.forest.vitality * 100)}%`], ['Fusões de nuvens', `${st.merges}`],
       ['Créditos ganhos', `${fmt(st.earned)}`], ['Patentes', `+${b.reward}`],
     ].map(([a, v]) => `<span>${a}</span><b>${v}</b>`).join('');
-    ($('win-next') as HTMLButtonElement).textContent = next ? `Próximo: ${next.name}` : 'Recomeçar o último';
+    ($('win-next') as HTMLButtonElement).textContent = next ? `Levar a semente: ${next.name}` : 'Recomeçar a jornada';
     this.open('win');
   }
 
@@ -256,6 +287,7 @@ export class UI {
     if (v.mode === 'play' && v.selection) {
       key += `:${v.selection.type}:${v.selection.id}:${g.cam.followId}`;
       if (v.selection.type === 'machine') key += `:${s.byId.get(v.selection.id)?.on}`;
+      if (v.selection.type === 'cloud') key += `:${Math.floor(s.pouch)}`;
     }
     if (key === this.ctxKey) { this.updateCtxStats(); return; }
     this.ctxKey = key;
@@ -291,8 +323,8 @@ export class UI {
       if (!g.cloudInfo(sel.id)) { g.view.selection = null; return ''; }
       const following = g.cam.followId === sel.id;
       return `<h3>${icon('cloud', 20)} Nuvem</h3><div class="stats" id="ctx-stats"></div>
-        <div class="desc">Arraste a nuvem e solte com força para arremessá-la.</div>
-        <div class="actions"><button class="btn ${following ? 'iron' : ''}" data-a="follow">${following ? 'Parar de seguir' : 'Seguir com a câmera'}</button></div>`;
+        <div class="desc">Arraste a nuvem e solte com força para arremessá-la. Semeie-a para que a chuva faça a terra brotar.</div>
+        <div class="actions"><button class="btn green" data-a="seed">${icon('seed', 16)}Semear (${Math.min(POUCH_GIVE, Math.floor(s.pouch))})</button><button class="btn ${following ? 'iron' : ''}" data-a="follow">${following ? 'Parar de seguir' : 'Seguir com a câmera'}</button></div>`;
     }
     if (sel.type === 'pipe') {
       const p = s.pipes.find(q => q.id === sel.id);
@@ -338,6 +370,7 @@ export class UI {
         ['Velocidade', `${(sp * 0.25).toFixed(1)} m/s`], ['Direção', `${arrows[(Math.round(ang / (Math.PI / 4)) + 8) % 8]} ${deg(ang)}°`],
         ['Temperatura', `${c.temp.toFixed(1)} °C`], ['Saturação', `${Math.round(ratio * 100)}%`],
         ['Potencial', `${fmt(c.mass * 0.75)} L`], ['Estado', c.raining ? `Chovendo ${c.rainRate.toFixed(1)} L/s` : ratio > 0.7 ? 'Quase chovendo' : 'Viajando'],
+        ['Sementes', c.seeds >= 0.5 ? `${fmt(c.seeds)}${c.mother ? ' (Nuvem-Mãe)' : ''}` : 'nenhuma'],
       ];
     } else if (sel.type === 'pipe') {
       const p = s.pipes.find(q => q.id === sel.id);
@@ -376,6 +409,20 @@ export class UI {
         }
         case 'valve': rows.push(['Estado', m.on ? 'aberta' : 'fechada']); break;
         case 'divider': rows.push(['Divide nuvens', '≥ 8 L'], ['Estado', m.on ? 'ativo' : 'desligado']); break;
+        case 'greenhouse': {
+          const full = m.seeds >= s.mods.seedCap(m.kind) - 0.05;
+          rows.push(['Vapor', `${m.steam.toFixed(1)} / ${fmt(sc)} L`], ['Sementes', `${Math.floor(m.seeds)} / ${fmt(s.mods.seedCap(m.kind))}`],
+            ['Produção', `${(m.rate * 60).toFixed(1)} /min`], ['Adubo', `+${Math.round((s.greenhouseMul() - 1) * 100)}%`],
+            ['Estado', !m.on ? 'desligada' : full ? 'CHEIA — ligue um Semeador' : m.steam < 0.2 ? 'SEM VAPOR — tubo branco de uma caldeira' : m.water < 0.2 ? 'SEM ÁGUA — tubo azul' : 'germinando']);
+          break;
+        }
+        case 'seeder':
+          rows.push(['Sementes', `${Math.floor(m.seeds)} / ${fmt(s.mods.seedCap(m.kind))}`], ['Disparando', `${m.rate.toFixed(1)} /s`],
+            ['Estado', !m.on ? 'desligado' : m.seeds < 0.5 ? 'vazio — ligue uma Estufa' : m.rate > 0.01 ? 'semeando a nuvem acima' : 'esperando uma nuvem passar por cima']);
+          break;
+        case 'compost':
+          rows.push(['Vida da floresta', `${Math.round(s.forest.vitality * 100)}%`], ['Bônus nas Estufas', `+${Math.round((s.greenhouseMul() - 1) * 100)}%`]);
+          break;
       }
     }
     el.innerHTML = rows.map(([a, b]) => `<div><span>${a}</span><b>${b}</b></div>`).join('');
@@ -392,6 +439,7 @@ export class UI {
       case 'ok': g.confirmGhost(); break;
       case 'cancel': g.cancelGhost(); break;
       case 'pipedone': g.setMode('play'); break;
+      case 'seed': if (sel) { res(s.seedByHand(sel.id)); this.refreshCtx(); } break;
       case 'follow': if (sel) { g.cam.followId = g.cam.followId === sel.id ? null : sel.id; this.refreshCtx(); } break;
       case 'rmpipe': if (sel) { s.removePipe(sel.id); g.audio.play('sell'); g.select(null); } break;
       case 'pour': if (m) res(s.pourBucket(m)); break;
@@ -427,6 +475,10 @@ export class UI {
     $('h-clouds').textContent = String(s.clouds.clouds.length);
     $('h-bucket-v').textContent = s.bucket.toFixed(0);
     $('h-bucket').classList.toggle('full', s.bucket > 0);
+    $('h-pouch-v').textContent = String(Math.floor(s.pouch));
+    $('h-pouch').classList.toggle('empty', s.pouch < 1);
+    if (this.risen !== cr.awake) this.rebuildCreature();
+    if (!cr.awake) { this.updateSeedPanel(); this.finishHud(); return; }
     // the Ancient
     const sat = s.climate.humidity / b.humidity.target;
     $('cr-hum').textContent = `${Math.round(sat * 100)}%`;
@@ -442,6 +494,31 @@ export class UI {
     $('cr-pips').querySelectorAll('i').forEach((p, i) => p.classList.toggle('on', i < cr.stage));
     ($('cr-gfill').style.width = `${Math.round(Math.min(1, cr.progress) * 100)}%`);
     $('cr-rain').innerHTML = s.rates.rain > 0.02 ? `${s.rates.rain.toFixed(1)} L/s` : '';
+    this.finishHud();
+  }
+
+  /** before the Ancient rises: soil moisture, land vitality towards the goal, parcels done */
+  private updateSeedPanel() {
+    const s = this.g.sim, f = s.forest, aw = s.biome.forest.awaken;
+    const moist = f.meanMoist;
+    $('cr-hum').textContent = `${Math.round(moist * 100)}%`;
+    $('cr-fill').style.width = `${Math.min(100, moist * 100)}%`;
+    $('cr-notch').style.left = '35%';
+    $('cr-tube').classList.toggle('low', moist < 0.35);
+    const heart = f.heartLife;
+    const mood = $('cr-mood');
+    mood.textContent = heart >= 2.8 ? 'Coração: árvore' : heart >= 1.4 ? 'Coração: arbusto' : heart >= 0.05 ? 'Coração: broto' : 'Dormente';
+    mood.className = `cr-mood ${heart >= 2.8 ? 'content' : 'sleeping'}`;
+    const eye = $('cr-eye');
+    eye.classList.toggle('sleeping', true);
+    eye.style.setProperty('--eye', EYE.sleeping);
+    $('cr-pips').querySelectorAll('i').forEach((p, i) => p.classList.toggle('on', f.zoneVitality(i) >= aw));
+    $('cr-gfill').style.width = `${Math.round(Math.min(1, f.vitality / aw) * 100)}%`;
+    $('cr-rain').innerHTML = `Vida ${Math.round(f.vitality * 100)}% / ${Math.round(aw * 100)}%`;
+  }
+
+  private finishHud() {
+    const s = this.g.sim;
     this.updateMission();
     if (!$('shop').classList.contains('hidden')) this.refreshShop();
     if (this.tree.isOpen) this.tree.refresh();

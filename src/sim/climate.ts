@@ -22,7 +22,8 @@ export class Climate {
     const b = this.biome;
     const t = b.temp;
     const toMid = smoothstep(b.factoryEnd - 200, b.factoryEnd + 300, x);
-    const toTarget = smoothstep(this.coldStart - 160, this.coldStart + 120, x);
+    // the cold, rainy air deepens gradually across the land to reforest
+    const toTarget = smoothstep(this.coldStart - 160, this.coldStart + 120 + 0.25 * (b.targetEnd - b.targetStart), x);
     return lerp(lerp(t.factory, t.mid, toMid), t.target, toTarget);
   }
 

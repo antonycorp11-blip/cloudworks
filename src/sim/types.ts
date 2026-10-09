@@ -13,6 +13,7 @@ export interface Machine {
   power: number;   // 0..1 intensity (wind machines)
   water: number;
   steam: number;
+  seeds: number;   // seed stock (greenhouse output / seeder buffer)
   heat: number;    // 0..1 boiler temperature
   fire: number;    // seconds of fire left (rudimentary boiler)
   emitted: number; // vapor waiting to condense into a cloud
@@ -50,6 +51,8 @@ export interface Cloud {
   splitCd: number;
   pulse: number;  // visual wobble after merge/split
   held?: boolean; // grabbed by the player's finger
+  seeds: number;  // seeds carried inside the cloud; they fall with its rain
+  mother?: boolean; // a Nuvem-Mãe (rare storm event)
 }
 
 export const cloudRadius = (mass: number) => 12 + 15 * Math.sqrt(Math.max(0, mass));
