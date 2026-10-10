@@ -143,7 +143,6 @@ export class Renderer {
     this.drawDecor(sim, cam, dt);
     this.drawVegetation(sim, cam, dt);
     this.drawCreature(sim, cam, dt, t);
-    this.drawWorker(sim, t);
     this.drawPipes(sim, view);
     this.drawMachines(sim, cam, view, t);
     this.updateSteam(sim, cam, dt);
@@ -222,7 +221,6 @@ export class Renderer {
     const d: Decor[] = [];
     const add = (kind: DecorKind, x: number, s = 1) => d.push({ kind, x, s, seed: r() * 1e6, flip: r() < 0.5, a: r() * 6 });
     const L = T.sea;
-    add('shack', L.x1 + 50);
     add('lantern', L.x1 + 100);
     add('sign', L.x1 + 12);
     add('crates', L.x1 + 330);
@@ -1303,29 +1301,7 @@ export class Renderer {
     c.fillStyle = '#f1e6c8'; c.fillRect(nx - 1, gy - 56, 2, 8); c.fillRect(nx - 1, gy - 46, 2, 2);
   }
 
-  private drawWorker(sim: Sim, t: number) {
-    const b = sim.machines.find(m => m.kind === 'boiler' || m.kind === 'boiler_ind');
-    if (!b) return;
-    const c = this.ctx;
-    const x = b.x - MACHINES[b.kind].w / 2 - 16;
-    const gy = sim.terrain.groundY(x);
-    if (sim.terrain.isSea(x)) return;
-    const pumping = b.boost > 0.05;
-    const bob = pumping ? Math.abs(Math.sin(t * 14)) * 3 : Math.sin(t * 2) * 0.6;
-    c.save();
-    c.translate(x, gy);
-    c.fillStyle = '#1a1210'; c.fillRect(-6, -4, 5, 4); c.fillRect(1, -4, 5, 4);
-    c.fillStyle = '#3a3040'; c.fillRect(-5, -14, 4, 10); c.fillRect(1, -14, 4, 10);
-    c.fillStyle = '#6a4a2a'; c.fillRect(-7, -30 + bob * 0.3, 14, 17);
-    c.fillStyle = '#4a321c'; c.fillRect(-7, -22 + bob * 0.3, 14, 2);
-    c.fillStyle = '#d9a77c'; c.fillRect(-4, -38 + bob * 0.3, 8, 8);
-    c.fillStyle = '#2a1e16'; c.fillRect(-7, -41 + bob * 0.3, 14, 3); c.fillRect(-4, -45 + bob * 0.3, 8, 5);
-    c.fillStyle = '#6a4a2a';
-    if (pumping) { c.fillRect(5, -27 + bob, 9, 4); c.fillStyle = '#7a4a2a'; c.fillRect(12, -30 + bob, 8, 10); c.fillStyle = '#3a2416'; c.fillRect(12, -22 + bob, 8, 2); }
-    else if (sim.bucket > 0) { c.fillRect(-10, -27, 4, 10); c.fillStyle = '#5a5a60'; c.fillRect(-14, -18, 9, 9); c.fillStyle = C.water; c.fillRect(-13, -18, 7, 3); }
-    else c.fillRect(5, -27, 4, 10);
-    c.restore();
-  }
+
 
   // ───────────────────────── machines & pipes ─────────────────────────
   private drawPipes(sim: Sim, view: ViewState) {
