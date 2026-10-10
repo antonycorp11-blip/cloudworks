@@ -107,6 +107,11 @@ export class Game implements InputHandler {
   /** the Semente-Mãe before it rises, then the Ancient's body */
   goTarget() {
     const s = this.sim, x = s.creature.awake ? s.creature.geometry().cx : s.forest.heartX;
+    // a grown Ancient doesn't fit the usual framing: pull the camera back to see all of it
+    if (s.creature.awake) {
+      const g = s.creature.geometry(), need = (s.creature.anchor - g.headX) * 1.5;
+      if (need > this.cam.viewW) { this.cam.zoom = this.cam.lowW / need; this.cam.clamp(); }
+    }
     this.goTo(x, s.biome.groundBase - this.cam.viewH * (this.cam.cssW > this.cam.cssH ? 0.3 : 0.14));
   }
   goHome() { const l = this.cam.cssW > this.cam.cssH; this.goTo(this.sim.terrain.sea.x1 + (l ? 220 : 130), this.sim.biome.groundBase - this.cam.viewH * (l ? 0.3 : 0.14)); }

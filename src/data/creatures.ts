@@ -13,12 +13,12 @@ export interface CreatureDef {
 
 /** One Ancient per biome (same index as BIOMES). */
 export const CREATURES: CreatureDef[] = [
-  { name: 'Bramo', title: 'o Bebedor de Tempestades', needs: [0, 550, 1450, 2900, 4800], skin: { stone: '#3b3430', stoneLight: '#5a5048', moss: '#4f8a3a', eye: '#ffb347' } },
-  { name: 'Ceifa', title: 'a Guardiã dos Campos', needs: [0, 450, 1100, 2100, 3400], skin: { stone: '#4a3c30', stoneLight: '#6a5a46', moss: '#7aa844', eye: '#ffd36a' } },
-  { name: 'Ossudo', title: 'o Rei da Savana Seca', needs: [0, 650, 1550, 2900, 4700], skin: { stone: '#5a4030', stoneLight: '#7a5a40', moss: '#94a848', eye: '#ff8a3a' } },
-  { name: 'Granito', title: 'o Pico que Dorme', needs: [0, 1000, 2350, 4250, 6700], skin: { stone: '#4a4a52', stoneLight: '#6e6e78', moss: '#5a9a5a', eye: '#8ad8ff' } },
-  { name: 'Duna', title: 'a Sede sem Fim', needs: [0, 1700, 3800, 6900, 11000], skin: { stone: '#7a5a3a', stoneLight: '#a07a50', moss: '#8a9c46', eye: '#ffe06a' } },
-  { name: 'Brasa', title: 'o Coração de Cinzas', needs: [0, 2700, 6050, 10700, 16800], skin: { stone: '#2a2020', stoneLight: '#4a3632', moss: '#5c8c48', eye: '#ff5a2a' } },
+  { name: 'Bramo', title: 'o Bebedor de Tempestades', needs: [0, 550, 1450, 2900, 4800], skin: { stone: '#6a5a50', stoneLight: '#9a8676', moss: '#4fc24a', eye: '#ffb347' } },
+  { name: 'Ceifa', title: 'a Guardiã dos Campos', needs: [0, 450, 1100, 2100, 3400], skin: { stone: '#7a6248', stoneLight: '#a88a64', moss: '#8ad04a', eye: '#ffd36a' } },
+  { name: 'Ossudo', title: 'o Rei da Savana Seca', needs: [0, 650, 1550, 2900, 4700], skin: { stone: '#8a6248', stoneLight: '#b88a66', moss: '#a8c84a', eye: '#ff8a3a' } },
+  { name: 'Granito', title: 'o Pico que Dorme', needs: [0, 1000, 2350, 4250, 6700], skin: { stone: '#6a6a80', stoneLight: '#9a9ab0', moss: '#5ac06a', eye: '#8ad8ff' } },
+  { name: 'Duna', title: 'a Sede sem Fim', needs: [0, 1700, 3800, 6900, 11000], skin: { stone: '#a07a4a', stoneLight: '#d0a870', moss: '#a8c050', eye: '#ffe06a' } },
+  { name: 'Brasa', title: 'o Coração de Cinzas', needs: [0, 2700, 6050, 10700, 16800], skin: { stone: '#5a3a38', stoneLight: '#8a5a50', moss: '#6ac04a', eye: '#ff5a2a' } },
 ];
 
 export const MOOD_LABEL: Record<Mood, string> = {

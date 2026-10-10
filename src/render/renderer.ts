@@ -40,8 +40,8 @@ const ch = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 const pack = (r: number, g: number, b: number) => (255 << 24) | (ch(b) << 16) | (ch(g) << 8) | ch(r);
 const packC = (c: RGB, k = 1) => pack(c[0] * k, c[1] * k, c[2] * k);
 
-const STORM_TOP: RGB = [24, 27, 36];
-const STORM_BOT: RGB = [70, 76, 88];
+const STORM_TOP: RGB = [52, 56, 78];
+const STORM_BOT: RGB = [104, 110, 132];
 
 const MAX_DROPS = 3000, MAX_SPL = 500, MAX_STEAM = 700, MAX_STREAKS = 260, MAX_BITS = 400;
 
@@ -290,7 +290,7 @@ export class Renderer {
     // the Véu: ash-brown when it thickens, a warm clear sky where it has torn open
     sTop = mixC(sTop, [38, 30, 30], veil * 0.55);
     sBot = mixC(sBot, [72, 58, 50], veil * 0.5);
-    sBot = mixC(sBot, [236, 200, 150], sun * 0.35);
+    sBot = mixC(sBot, [255, 236, 200], sun * 0.12);
     sTop = mixC(sTop, STORM_TOP, st * 0.8);
     sBot = mixC(sBot, STORM_BOT, st * 0.75);
     const haze = mixC(hex(p.haze), sBot, 0.4 + skyH * 0.4);
@@ -312,7 +312,8 @@ export class Renderer {
     const veilC = mixC(mixC(sBot, [40, 34, 40], 0.45 - 0.3 * sun), STORM_BOT, st * 0.4);
     for (let y = 0; y < H; y++) {
       const wy = top + y / z;
-      let col = mixC(sTop, sBot, Math.pow(clamp(wy / b.groundBase, 0, 1), 1.6));
+      // the gradient spans the screen: deep colour at the top, light near the horizon
+      let col = mixC(sTop, sBot, Math.pow(clamp(y / H, 0, 1), 1.15));
       col = mixC(col, glowC, smoothstep(b.groundBase - 560, b.groundBase - 40, wy) * glowK * 0.85);
       rr[y * 3] = col[0]; rr[y * 3 + 1] = col[1]; rr[y * 3 + 2] = col[2];
       rows[y] = packC(col);
@@ -324,12 +325,17 @@ export class Renderer {
     const lut = (n: number, f: (t: number) => RGB) => { const a = new Uint32Array(n + 1); for (let k = 0; k <= n; k++) a[k] = packC(f(k / n)); return a; };
     const farL = lut(N, t => mixC(farC, fogC, t * 0.55)), midL = lut(N, t => mixC(midC, fogC, t * 0.5));
     const farTop = packC(mixC(farC, glowC, 0.3 * glowK + 0.08)), midTop = packC(mixC(midC, glowC, 0.45 * glowK + 0.08));
+    // background forests on the hills: sparse grey stubs during the drought, full green crowns as the land heals
+    const grow = 0.3 + 0.7 * he;
+    const farTreeC = packC(mixC(mixC(farC, [70, 140, 90], 0.35 * he), fogC, 0.15)), farTreeHi = packC(mixC(mixC(farC, [120, 190, 120], 0.35 * he), glowC, 0.2 * glowK));
+    const midTreeC = packC(mixC(midC, [50, 120, 70], 0.45 * he)), midTreeHi = packC(mixC(mixC(midC, [110, 190, 100], 0.45 * he), glowC, 0.3 * glowK));
     const water = hex(p.water), waterDeep = mul(water, 0.28), waterTop = mixC(water, [150, 200, 220], 0.25);
     const waterL = lut(N, t => mixC(mixC(waterTop, waterDeep, t), STORM_BOT, st * 0.3));
     const foam = packC([222, 236, 244]), foamSoft = packC(mixC(waterTop, [200, 225, 240], 0.4));
     const shine = packC(mixC(mixC(waterTop, sunC, 0.55 * sunA), STORM_BOT, st * 0.3)), spark = packC(mixC(waterTop, glowC, 0.5 * glowK));
     const dry = hex(p.groundDry), wetC = hex(p.groundWet), dirt = hex(p.dirt), gD = hex(p.grassDry), gW = hex(p.grassWet), rock = hex(p.rock);
-    const sand: RGB = [176, 150, 108], snow: RGB = [236, 240, 244];
+    const sand: RGB = [214, 186, 128], snow: RGB = [236, 240, 244];
+    const ore1 = packC([255, 214, 90]), ore2 = packC([110, 220, 230]);
     const tick = Math.floor(this.time * 3);
     const seed = b.hills.seed;
     const zF = 60 * z + 6, zM = 90 * z + 8;
@@ -338,8 +344,20 @@ export class Renderer {
     for (let sx = 0; sx < W; sx++) {
       const wx = left + (sx + 0.5) / z;
       const lf = cam.x * 0.25 + (sx - W / 2) / z, lm = cam.x * 0.5 + (sx - W / 2) / z, lb = cam.x * 0.1 + (sx - W / 2) / z;
-      const syF = Math.round((b.groundBase - this.farH(lf, seed) - top) * z);
-      const syM = Math.round((b.groundBase - this.midH(lm, seed) - top) * z);
+      const syF0 = Math.round((b.groundBase - this.farH(lf, seed) - top) * z);
+      const syM0 = Math.round((b.groundBase - this.midH(lm, seed) - top) * z);
+      // pines on the far hills, round crowns on the near hills
+      let syF = syF0, syM = syM0;
+      {
+        const cf = Math.floor(lf / 26), hf = hash1(cf, seed + 60);
+        if (hf > 0.3) { const lx = Math.abs(lf - cf * 26 - 13), w = 9 + 4 * hf, th = (14 + 26 * hf) * grow; if (lx < w) syF = Math.min(syF, syF0 - Math.round(th * (1 - lx / w) * z)); }
+        const cm = Math.floor(lm / 38), hm = hash1(cm, seed + 70);
+        if (hm > 0.25) {
+          const lx = Math.abs(lm - cm * 38 - 19), r = (9 + 7 * hm) * grow, trunk = (8 + 10 * hm) * grow;
+          if (lx < r) syM = Math.min(syM, syM0 - Math.round((trunk + Math.sqrt(1 - (lx / r) ** 2) * r) * z));
+          else if (lx < 1.5) syM = Math.min(syM, syM0 - Math.round(trunk * z));
+        }
+      }
       // the Véu: a ragged ceiling of ash overhead, pulled back as it tears open
       const syB = Math.round(H * (0.09 + 0.05 * noise1(lb / 260, seed + 21) + 0.018 * noise1(lb / 60, seed + 4) - 0.16 * sun + 0.07 * veil));
       const gy = T.groundY(wx);
@@ -354,12 +372,10 @@ export class Renderer {
       const soil = isRock ? rock : mixC(mixC(mixC(dry, wetC, green * 0.9), sand, beachK * 0.8), mul(dry, 0.7), Math.min(0.5, wet * 0.6));
       const grass = isRock && high > 300 ? snow : mixC(mixC(gD, gW, Math.min(1, green * 1.1)), [196, 172, 124], beachK);
       // tufts: grass is thicker and more ragged where the land is alive
-      const grassD = 3 + 4 * green + hash1(Math.floor(wx / 3), 8) * 4 * green;
+      const grassD = 4 + 4 * green + hash1(Math.floor(wx / 4), 8) * 3;
       const grassC = packC(grass, 1 + n), grassHi = packC(mixC(grass, glowC, 0.45 * glowK + 0.1)), grassDk = packC(grass, 0.72 + n);
-      const soilC = packC(soil, 1 + n), soilDk = packC(soil, (1 + n) * (0.62 + green * 0.6)), soilLt = packC(soil, 1.3 + n);
-      const base = isRock ? rock : dirt, k0 = 1 + n;
-      const br = base[0] * k0, bg = base[1] * k0, bb = base[2] * k0;
-      const pebble = packC(mixC(base, soil, 0.6), 1.25);
+      const soilLt = packC(soil, 1.3 + n);
+      const base = isRock ? rock : dirt;
       const shoreK = clamp((wx - (T.sea.x1 - 400)) / 400, 0, 1);
       const wave = (2.5 + 3 * shoreK) * Math.sin(wx / 38 + this.time * 1.6) + 2 * Math.sin(wx / 15 - this.time * 2.4) + 4 * Math.sin(wx / 130 + this.time * 0.7);
       const inSea = wx < T.sea.x1 && gy > T.seaLevel + wave;
@@ -368,6 +384,7 @@ export class Renderer {
       const moonCol = sx > sunCols0 && sx < sunCols1;
       const ix = Math.floor(wx / 2);
       const crackable = !isRock && green < 0.45;
+      const tx = Math.floor(wx / 8), fx = wx - tx * 8;
       const sky = Math.min(syF, syG, sw, H);
       skyEnd[sx] = sky;
       this.ceil[sx] = syB;
@@ -390,28 +407,32 @@ export class Renderer {
           continue;
         }
         if (y < syG) {
-          if (y < syM) buf[i] = y === syF ? farTop : farL[Math.min(N, ((y - syF) / zF * N) | 0)];
-          else buf[i] = y === syM ? midTop : midL[Math.min(N, ((y - syM) / zM * N) | 0)];
+          if (y < syM) buf[i] = y < syF0 ? (y === syF ? farTreeHi : farTreeC) : y === syF ? farTop : farL[Math.min(N, ((y - syF0) / zF * N) | 0)];
+          else buf[i] = y < syM0 ? (y === syM ? midTreeHi : midTreeC) : y === syM ? midTop : midL[Math.min(N, ((y - syM0) / zM * N) | 0)];
           continue;
         }
         const d = (y - syG) / z;
         let c: number;
-        if (d < grassD && sw > syG) c = y === syG ? grassHi : d > grassD - 1.5 ? grassDk : grassC;
-        else if (d < 38) {
-          c = soilC;
-          if (crackable && d < 30) {
-            const u = wx + d * 0.7;
-            const crack = (Math.abs(u % 14) < 1.2 && hash1(Math.floor(u / 14), Math.floor(d / 7) + 11) > 0.4)
-              || (Math.abs((d % 10) - 5) < 0.7 && hash1(Math.floor(wx / 12), Math.floor(d / 10) + 5) > 0.62);
-            if (crack) c = soilDk;
-          }
-          if (d < grassD + 3 && sw > syG) c = soilLt; // sunlit lip under the grass
-        } else if (d < 44) c = hash1(ix, Math.floor(d) + 31) > 0.55 ? pebble : soilDk; // a stony layer between soil and earth
-        else {
-          const f = d < 150 ? 1 - (d - 44) / 300 : 0.65;
-          c = pack(br * f, bg * f, bb * f);
+        if (d < grassD && sw > syG) { buf[i] = y === syG ? grassHi : d > grassD - 1.5 ? grassDk : grassC; continue; }
+        // blocks of earth (8 units), each a little different, lit on top-left and shaded bottom-right;
+        // stone blocks become common deeper down, with the odd glint of ore
+        const ty = Math.floor(d / 8), fy = d - ty * 8;
+        const hv = hash1(tx * 197 + ty * 31, 5);
+        const deep = d > 30 ? Math.min(1, (d - 30) / 90) : 0;
+        const stone = isRock || hv > 0.93 - deep * 0.35;
+        let r0: number, g0: number, b0: number;
+        if (stone) { r0 = rock[0]; g0 = rock[1]; b0 = rock[2]; }
+        else if (d < 22) { r0 = soil[0]; g0 = soil[1]; b0 = soil[2]; }
+        else { const k = Math.min(1, (d - 22) / 30); r0 = soil[0] + (base[0] - soil[0]) * k; g0 = soil[1] + (base[1] - soil[1]) * k; b0 = soil[2] + (base[2] - soil[2]) * k; }
+        let f = (1 + n) * (0.9 + 0.2 * hv) * (1 - deep * 0.35);
+        if (fy < 1.2 || fx < 1.2) f *= 1.14; else if (fy > 6.8 || fx > 6.8) f *= 0.78;
+        if (crackable && d < 24 && !stone) {
+          const u = wx + d * 0.7;
+          if (Math.abs(u % 14) < 1.1 && hash1(Math.floor(u / 14), Math.floor(d / 7) + 11) > 0.45) f *= 0.7;
         }
-        if (hash1(ix * 7 + Math.floor(d / 2) * 131, 9) > 0.986) c = pebble;
+        c = pack(r0 * f, g0 * f, b0 * f);
+        if (stone && deep > 0.2 && hv > 0.985) c = hv > 0.993 ? ore1 : ore2;
+        else if (d < grassD + 2.5 && sw > syG) c = soilLt; // sunlit lip under the grass
         buf[i] = c;
       }
     }
@@ -1869,7 +1890,7 @@ export class Renderer {
   private drawLighting(cam: Camera) {
     const c = this.ctx, l = this.lctx;
     const st = this.mood.storm, he = this.mood.health;
-    const dark = clamp((0.15 + 0.12 * (1 - he) + st * 0.38 + this.mood.veil * 0.14) * (1 - this.mood.flash * 0.9) * (1 - 0.55 * this.mood.sun), 0, 0.78);
+    const dark = clamp((0.04 + 0.08 * (1 - he) + st * 0.3 + this.mood.veil * 0.14) * (1 - this.mood.flash * 0.9) * (1 - 0.55 * this.mood.sun), 0, 0.78);
     const z = cam.zoom;
     l.setTransform(1, 0, 0, 1, 0, 0);
     l.globalCompositeOperation = 'source-over';
@@ -1928,7 +1949,7 @@ export class Renderer {
   private drawForeground(sim: Sim, cam: Camera) {
     const c = this.ctx, W = cam.lowW, H = cam.lowH, z = cam.zoom;
     c.setTransform(1, 0, 0, 1, 0, 0);
-    c.fillStyle = css(mixC([6, 7, 12], hex(sim.biome.palette.grassWet), this.mood.health * 0.25));
+    c.fillStyle = css(mixC(mul(hex(sim.biome.palette.nearHills), 0.35), mul(hex(sim.biome.palette.grassWet), 0.45), this.mood.health * 0.6));
     const base = H - Math.max(4, H * 0.035);
     for (let sx = 0; sx < W; sx++) {
       const fx = cam.x * 1.5 * z + sx;
