@@ -28,6 +28,7 @@ export class UI {
   private speech: { text: string; shown: number; life: number; angry: boolean } | null = null;
   private risen: boolean | null = null;
   private coinSfx = 0;
+  private hintTimer = 0;
   private missionId = '';
 
   constructor(private g: Game) {
@@ -40,6 +41,7 @@ export class UI {
     $('b-home').onclick = () => g.goHome();
     $('b-menu').onclick = () => this.open('menu');
     $('creature').onclick = () => g.goTarget();
+    $('mission').onclick = () => { clearTimeout(this.hintTimer); $('mission').classList.toggle('open'); };
     document.querySelectorAll<HTMLElement>('[data-close]').forEach(b => { b.onclick = () => this.close(b.dataset.close!); });
     this.tree = new TreeView(g);
     for (const id of ['menu']) $(id).addEventListener('pointerdown', e => { if (e.target === $(id)) this.close(id); });
@@ -561,6 +563,10 @@ export class UI {
     $('m-text').textContent = m.text.replace('{C}', name);
     $('m-hint').textContent = m.hint.replace('{C}', name);
     $('m-reward').innerHTML = `+${fmt(this.g.sim.missionReward(m.reward))}`;
+    // on phones the hint folds away: show it for a while when a new goal arrives
+    box.classList.add('open');
+    clearTimeout(this.hintTimer);
+    this.hintTimer = window.setTimeout(() => box.classList.remove('open'), 7000);
   }
 
   /** typewriter speech bubble anchored over the Ancient's head (docked under its panel if off-screen) */

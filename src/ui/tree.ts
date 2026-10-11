@@ -136,7 +136,7 @@ export class TreeView {
     const vp = $('tree-view').getBoundingClientRect();
     const n = NODE[id];
     const phone = vp.width < 560;
-    this.scale = phone ? 0.62 : Math.max(0.5, Math.min(1, vp.width / 900));
+    this.scale = phone ? 0.74 : Math.max(0.5, Math.min(1, vp.width / 900));
     this.ox = vp.width / 2 - this.px(n.x) * this.scale;
     this.oy = vp.height * (phone && this.selected ? 0.3 : 0.45) - this.py(n.y) * this.scale;
     this.board.style.transition = animate ? 'transform .45s cubic-bezier(.2,.8,.2,1)' : 'none';

@@ -371,3 +371,79 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .worldmap .wm-line.done { background: #f0a040; }
 @keyframes wmPulse { 50% { transform: scale(1.18); } }
 .cr-phase { font-size: 12.5px; color: var(--muted); }
+
+/* ── phones: a compact HUD, workshop grid, smaller panels and tree ── */
+@media (max-width: 600px) {
+  #hud { padding: calc(4px + var(--safe-t)) 6px 0; gap: 4px; }
+  .hud-left { gap: 4px; }
+  .creature { padding: 4px 8px 5px; }
+  .cr-top { gap: 6px; }
+  .cr-eye { width: 22px; height: 22px; }
+  .cr-names b { font-size: 16.5px; }
+  .cr-mood { font-size: 11.5px; padding: 0 4px; border-width: 1px; }
+  .tube { height: 13px; margin-top: 4px; border-width: 1px; }
+  .tube-label { font-size: 11px; }
+  .cr-growth { margin-top: 3px; font-size: 11.5px; gap: 4px; }
+  .plate.credits { padding: 2px 8px 2px 5px; }
+  .plate.credits b { font-size: 19px; }
+  .plate.credits small { font-size: 12px; }
+  .chip { padding: 1px 4px 1px 3px; border-width: 1px; }
+  .chip b { font-size: 13.5px; }
+  /* objective: just the goal; tap it for the hint (shown by itself when a new goal arrives) */
+  .mission { padding: 4px 9px 5px; }
+  .mission .m-head { font-size: 10.5px; letter-spacing: 1px; }
+  .mission .m-head b { font-size: 12.5px; }
+  .mission .m-text { font-size: 15px; margin-top: 0; }
+  .mission .m-hint { display: none; font-size: 13px; }
+  .mission.open .m-hint { display: block; }
+  .speech p { font-size: 15.5px; }
+  .speech { padding: 6px 9px 7px; }
+  .toast { font-size: 14px; }
+  /* workshop: a scrollable grid of small cards instead of a long row */
+  .sheet { padding: 8px; }
+  .sheet-head { margin-bottom: 4px; }
+  .sheet-head b { font-size: 19px; }
+  .sheet-head .muted { display: none; }
+  .sheet-head .x { margin-left: auto; }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; overflow-x: hidden; overflow-y: auto; max-height: 40vh; touch-action: pan-y; }
+  .card { width: auto; }
+  .card canvas { width: 54px; height: 44px; }
+  .card .n { font-size: 11.5px; min-height: 24px; }
+  .card .p { font-size: 12.5px; padding: 2px 0; }
+  /* machine / cloud panel */
+  .panel { padding: 8px; bottom: calc(68px + var(--safe-b)); }
+  .panel h3 { font-size: 18px; padding-right: 34px; }
+  .panel .desc { font-size: 13px; margin-bottom: 4px; }
+  .stats { font-size: 13px; padding: 3px 6px; margin: 2px 0 6px; gap: 1px 10px; }
+  .actions { gap: 4px; }
+  .actions .btn { font-size: 13.5px; min-height: 34px; padding: 0 8px; }
+  .slider { font-size: 13px; }
+  /* tree */
+  .tree-head { padding: calc(6px + var(--safe-t)) 8px 6px; gap: 6px; }
+  .tree-title { display: none; }
+  .tree-res { margin-right: auto; }
+  .tree-head > * { flex: none; }
+  .tree-head { background: linear-gradient(180deg, rgba(10,15,28,.95) 70%, rgba(10,15,28,0)); }
+  .tree-legend { display: none; }
+  .tree-head .x, .tree-head .btn { min-height: 34px; padding: 0 8px; }
+  .tree-detail { right: 6px; left: 6px; width: auto; bottom: calc(6px + var(--safe-b)); padding: 9px; max-height: 44vh; overflow-y: auto; }
+  .td-head { gap: 8px; }
+  .td-head .medal { width: 38px; height: 38px; }
+  .td-head small { font-size: 11.5px; }
+  .td-head b { font-size: 17px; }
+  .tree-detail p { font-size: 13.5px; margin: 5px 0; }
+  .tree-detail .eff { font-size: 13.5px; padding: 4px 8px; }
+  .unlocks { margin-top: 4px; }
+  .unlocks small { display: none; }
+  .ucard canvas { width: 40px; height: 33px; }
+  .ucard span { font-size: 12px; }
+  .td-actions .btn { min-height: 38px; font-size: 15px; }
+  /* modals */
+  .modal-box h2 { font-size: 25px; }
+  .quote { font-size: 15.5px; margin: 4px 2px 8px; }
+  .modal-box .journal { font-size: 14.5px; }
+  .win-stats { font-size: 14px; }
+  .worldmap .wm-node { width: 50px; font-size: 10.5px; }
+  .worldmap .wm-dot { width: 20px; height: 20px; }
+  #bar button .lbl { font-size: 11px; }
+}
