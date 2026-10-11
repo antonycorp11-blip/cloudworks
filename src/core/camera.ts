@@ -54,7 +54,7 @@ export class Camera {
     this.zoom = clamp(this.zoom, this.minZoom(), this.maxZoom());
     const hw = this.viewW / 2, hh = this.viewH / 2;
     this.x = hw * 2 >= this.worldW + 900 ? this.worldW / 2 - 250 : clamp(this.x, hw - 700, this.worldW + 200 - hw); // the sea extends to the left
-    const bottom = this.worldH + Math.max(120, this.viewH * 0.4);
+    const bottom = this.worldH + 45; // a little earth below the ground, not a wall of dirt
     const topLimit = -400;
     this.y = hh * 2 >= bottom - topLimit ? (bottom + topLimit) / 2 : clamp(this.y, topLimit + hh, bottom - hh);
   }

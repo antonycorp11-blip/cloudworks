@@ -325,7 +325,7 @@ export class UI {
         </div>`;
     } else if (v.mode === 'pipe') {
       box.innerHTML = `<h3>${icon('pipe', 20)} Tubulação</h3>
-        <div class="desc">${v.pendingPort ? 'Agora toque numa <b>entrada</b> compatível — ou arraste até ela.' : 'Arraste de uma <b>saída</b> (quadrado cheio) até uma <b>entrada</b> (quadrado vazado). Azul = água, branco = vapor.'}</div>
+        <div class="desc">${v.pendingPort ? 'Agora toque na máquina que vai <b>receber</b> — as entradas compatíveis piscam em verde.' : 'Toque na máquina de <b>onde sai</b> e depois na que <b>recebe</b>. Azul = água, branco = vapor, verde = sementes. Dica: máquinas novas já se ligam sozinhas à vizinha mais próxima.'}</div>
         <div class="actions"><button class="btn" data-a="pipedone">Concluir</button></div>`;
     } else if (v.selection) {
       box.innerHTML = this.selectionHtml();

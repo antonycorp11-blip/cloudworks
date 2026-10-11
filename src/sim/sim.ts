@@ -715,6 +715,37 @@ export class Sim implements CloudHost, FluidHost {
     return { ok: true };
   }
 
+  /**
+   * Plumb a freshly built machine to its neighbours: every free input takes the nearest free output of
+   * the same fluid, every free output feeds the nearest free input. Returns what was connected.
+   */
+  autoConnect(id: number, range = 520): string[] {
+    const m = this.byId.get(id);
+    if (!m) return [];
+    const done: string[] = [];
+    const hasIn = (mm: Machine, port: string) => this.pipes.some(p => p.to.m === mm.id && p.to.port === port);
+    const hasOut = (mm: Machine, port: string) => this.pipes.some(p => p.from.m === mm.id && p.from.port === port);
+    for (const port of MACHINES[m.kind].ports) {
+      const here = portWorld(m, port);
+      let best: { m: Machine; port: string; d: number } | null = null;
+      for (const o of this.machines) {
+        if (o === m) continue;
+        for (const q of MACHINES[o.kind].ports) {
+          if (q.fluid !== port.fluid || q.dir === port.dir) continue;
+          // a water source can feed several machines (a little less preferred); steam and seeds are never stolen
+          const used = port.dir === 'in' ? hasOut(o, q.id) : hasIn(o, q.id);
+          if (used && !(port.dir === 'in' && q.fluid === 'water')) continue;
+          const w = portWorld(o, q), dist = Math.hypot(w.x - here.x, w.y - here.y), d = dist + (used ? 250 : 0);
+          if (dist < range && (!best || d < best.d)) best = { m: o, port: q.id, d };
+        }
+      }
+      if (!best || (port.dir === 'in' ? hasIn(m, port.id) : hasOut(m, port.id))) continue;
+      const r = this.connect({ m: m.id, port: port.id }, { m: best.m.id, port: best.port });
+      if (r.ok) done.push(port.dir === 'in' ? `${MACHINES[best.m.kind].name} → ${MACHINES[m.kind].name}` : `${MACHINES[m.kind].name} → ${MACHINES[best.m.kind].name}`);
+    }
+    return done;
+  }
+
   /** Connect two ports (order-independent). */
   connect(a: PipeEnd, b: PipeEnd, free = false): Result {
     const ma = this.byId.get(a.m), mb = this.byId.get(b.m);

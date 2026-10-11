@@ -100,7 +100,7 @@ export class Game implements InputHandler {
     this.cam.worldW = this.sim.biome.width;
     this.cam.worldH = this.sim.biome.groundBase + 120;
     const landscape = this.cam.cssW > this.cam.cssH;
-    const viewWorldW = landscape ? 840 : 560;
+    const viewWorldW = landscape ? 840 : 470;
     this.cam.zoom = this.cam.lowW / viewWorldW;
     this.cam.x = this.sim.terrain.sea.x1 + (landscape ? 220 : 130);
     this.cam.y = this.sim.biome.groundBase - this.cam.viewH * (landscape ? 0.3 : 0.14);
@@ -249,9 +249,14 @@ export class Game implements InputHandler {
       ? this.sim.move(g.moveId, this.want.x, this.want.y, g.angle, g.flip)
       : this.sim.build(g.kind, this.want.x, this.want.y, g.angle, g.flip, g.power);
     if (!r.ok) { this.ui.toast(r.reason ?? 'Inválido', 'warn'); this.audio.play('error'); return; }
+    const built = g.moveId == null ? (r as { machine?: { id: number } }).machine?.id : undefined;
     this.view.ghost = null;
     this.view.mode = 'play';
     this.view.selection = null; // built: back to playing, no panel popping up
+    if (built != null) {
+      const links = this.sim.autoConnect(built);
+      if (links.length) this.ui.toast(`Ligado automaticamente: ${links.join(', ')}`, 'good');
+    }
     this.ui.refreshCtx();
     this.ui.refreshBar();
     this.save();
@@ -292,12 +297,14 @@ export class Game implements InputHandler {
   tap(wx: number, wy: number) {
     const s = this.sim;
     if (this.view.mode === 'place') {
-      // tap elsewhere moves the ghost there (comfortable on phones)
+      // tap elsewhere moves the ghost there; tap the ghost itself to build it (comfortable on phones)
       if (!this.overGhost(wx, wy)) { this.want = { x: wx, y: wy + (MACHINES[this.view.ghost!.kind].placement === 'mast' ? 0 : 10) }; this.ui.refreshCtx(); }
+      else if (this.view.ghost?.ok) this.confirmGhost();
       return;
     }
     if (this.view.mode === 'pipe') {
-      const port = this.portAt(wx, wy);
+      // the little port squares are hard to hit with a finger: tapping a machine picks its port for you
+      const port = this.portAt(wx, wy) ?? this.portOfMachine(wx, wy);
       if (!port) { this.view.pendingPort = null; this.ui.refreshCtx(); return; }
       if (!this.view.pendingPort) { this.view.pendingPort = port; this.audio.play('click'); this.ui.refreshCtx(); return; }
       this.tryConnect(this.view.pendingPort, port);
@@ -336,6 +343,21 @@ export class Game implements InputHandler {
       return;
     }
     this.select(null);
+  }
+
+  /** in pipe mode: the output of a tapped machine, or the input that matches the pending output */
+  private portOfMachine(wx: number, wy: number): { m: number; port: string } | null {
+    const m = this.sim.machineAt(wx, wy, 6 * this.cam.unitPerCss + 4);
+    if (!m) return null;
+    const ports = MACHINES[m.kind].ports;
+    const pend = this.view.pendingPort;
+    if (pend && pend.m !== m.id) {
+      const pm = this.sim.byId.get(pend.m), pp = pm && MACHINES[pm.kind].ports.find(q => q.id === pend.port);
+      const match = pp && ports.find(q => q.fluid === pp.fluid && q.dir !== pp.dir);
+      return match ? { m: m.id, port: match.id } : null;
+    }
+    const out = ports.find(q => q.dir === 'out') ?? ports[0];
+    return out ? { m: m.id, port: out.id } : null;
   }
 
   private feedback(r: { ok: boolean; reason?: string }) {

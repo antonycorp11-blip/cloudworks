@@ -343,6 +343,7 @@ export class Renderer {
     const dry = hex(p.groundDry), wetC = hex(p.groundWet), dirt = hex(p.dirt), gD = hex(p.grassDry), gW = hex(p.grassWet), rock = hex(p.rock);
     const sand: RGB = [214, 186, 128], snow: RGB = [236, 240, 244];
     const ore1 = packC([255, 214, 90]), ore2 = packC([110, 220, 230]);
+    const pav: RGB = mixC(hex(p.rock), [176, 120, 90], 0.45), pavHi = packC(mixC(pav, glowC, 0.3 * glowK + 0.15), 1.2);
     const tick = Math.floor(this.time * 3);
     const seed = b.hills.seed;
     const zF = 60 * z + 6, zM = 90 * z + 8;
@@ -400,6 +401,7 @@ export class Renderer {
       const moonCol = sx > sunCols0 && sx < sunCols1;
       const ix = Math.floor(wx / 2);
       const crackable = !isRock && green < 0.45;
+      const paved = wx > T.sea.x1 + 70 && wx < b.factoryEnd + 40 * noise1(wx / 90, 7);
       const tx = Math.floor(wx / 8), fx = wx - tx * 8;
       const sky = Math.min(syF, syG, sw, H);
       skyEnd[sx] = sky;
@@ -429,6 +431,15 @@ export class Renderer {
         }
         const d = (y - syG) / z;
         let c: number;
+        if (paved && d < 11) {
+          // brick paving: offset rows of bricks with mortar lines, lit on top
+          const row = Math.floor(d / 5.5), off = row % 2 ? 8 : 0;
+          const bx = Math.floor((wx + off) / 16), lx = wx + off - bx * 16, ly = d - row * 5.5;
+          const hv = hash1(bx * 13 + row * 7, 41);
+          const k = (lx < 1.2 || ly < 0.9) ? 0.55 : (ly < 2 ? 1.18 : 1) * (0.88 + hv * 0.2);
+          buf[i] = y === syG ? pavHi : pack(pav[0] * k, pav[1] * k, pav[2] * k);
+          continue;
+        }
         if (d < grassD && sw > syG) { buf[i] = y === syG ? grassHi : d > grassD - 1.5 ? grassDk : grassC; continue; }
         // blocks of earth (8 units), each a little different, lit on top-left and shaded bottom-right;
         // stone blocks become common deeper down, with the odd glint of ore
@@ -1339,34 +1350,43 @@ export class Renderer {
   private drawPipes(sim: Sim, view: ViewState) {
     const c = this.ctx;
     c.lineJoin = 'round';
+    const body = { water: '#2f6fae', steam: '#a8a4a0', seed: '#5a8a32' } as const;
+    const shine = { water: '#7cc7ff', steam: '#f2f0ec', seed: '#c8e06a' } as const;
+    const dot = { water: '#cfeeff', steam: '#ffffff', seed: '#f0f8a0' } as const;
     for (const p of sim.pipes) {
       const sel = view.selection?.type === 'pipe' && view.selection.id === p.id;
       c.beginPath();
       c.moveTo(p.path[0].x, p.path[0].y);
       for (let i = 1; i < p.path.length; i++) c.lineTo(p.path[i].x, p.path[i].y);
-      c.strokeStyle = sel ? '#ffe066' : '#140e0a';
-      c.lineWidth = sel ? 11 : 9;
+      c.strokeStyle = sel ? '#ffe066' : '#1a1410';
+      c.lineWidth = sel ? 13 : 11;
       c.stroke();
-      c.strokeStyle = p.fluid === 'water' ? '#6a5a4a' : p.fluid === 'seed' ? '#5e6238' : '#7d6a5a';
-      c.lineWidth = 6;
+      c.strokeStyle = body[p.fluid];
+      c.lineWidth = 8;
       c.stroke();
-      c.strokeStyle = p.fluid === 'water' ? 'rgba(120,190,230,0.35)' : p.fluid === 'seed' ? 'rgba(200,230,110,0.35)' : 'rgba(255,240,220,0.25)';
-      c.lineWidth = 2;
+      // glossy top edge
+      c.save(); c.translate(0, -2);
+      c.strokeStyle = shine[p.fluid]; c.globalAlpha = 0.55; c.lineWidth = 2;
       c.stroke();
+      c.restore();
       if (p.flow > 0.02) {
-        c.strokeStyle = p.fluid === 'water' ? C.waterL : p.fluid === 'seed' ? '#d8f07a' : '#ffffff';
-        c.lineWidth = 2.5;
-        c.setLineDash([5, 11]);
+        // bubbles running along the pipe, faster with more flow
+        c.strokeStyle = dot[p.fluid];
+        c.lineCap = 'round';
+        c.lineWidth = 3.5;
+        c.setLineDash([0.1, 13]);
         c.lineDashOffset = -p.phase * 3;
-        c.globalAlpha = Math.min(1, 0.35 + p.flow / 3);
+        c.globalAlpha = Math.min(1, 0.45 + p.flow / 3);
         c.stroke();
         c.setLineDash([]);
+        c.lineCap = 'butt';
         c.globalAlpha = 1;
       }
       for (let i = 1; i < p.path.length - 1; i++) {
-        c.fillStyle = '#140e0a'; c.fillRect(p.path[i].x - 6, p.path[i].y - 6, 12, 12);
-        c.fillStyle = '#8a5a34'; c.fillRect(p.path[i].x - 5, p.path[i].y - 5, 10, 10);
-        c.fillStyle = '#d9a35c'; c.fillRect(p.path[i].x - 4, p.path[i].y - 4, 2, 2);
+        c.fillStyle = '#1a1410'; c.fillRect(p.path[i].x - 7, p.path[i].y - 7, 14, 14);
+        c.fillStyle = '#c9a24a'; c.fillRect(p.path[i].x - 6, p.path[i].y - 6, 12, 12);
+        c.fillStyle = '#e8c76a'; c.fillRect(p.path[i].x - 6, p.path[i].y - 6, 12, 3);
+        c.fillStyle = '#7a5a24'; for (const [dx, dy] of [[-4, -1], [3, -1], [-4, 3], [3, 3]]) c.fillRect(p.path[i].x + dx, p.path[i].y + dy, 1.5, 1.5);
       }
     }
   }
@@ -1376,6 +1396,8 @@ export class Renderer {
     const x0 = cam.left - 150, x1 = cam.left + cam.viewW + 150;
     const groundAt = (x: number) => sim.terrain.groundY(x);
     const order = [...sim.machines].sort((a, b) => (a.kind === 'platform' ? 0 : 1) - (b.kind === 'platform' ? 0 : 1));
+    const pm = view.pendingPort ? sim.byId.get(view.pendingPort.m) : undefined;
+    const pend = pm ? MACHINES[pm.kind].ports.find(q => q.id === view.pendingPort!.port) : undefined;
     for (const m of order) {
       if (m.x < x0 || m.x > x1) continue;
       if (view.ghost?.moveId === m.id) c.globalAlpha = 0.25;
@@ -1398,7 +1420,14 @@ export class Renderer {
       for (const p of MACHINES[m.kind].ports) {
         const w = portWorld(m, p);
         const hot = !!view.pendingPort && view.pendingPort.m === m.id && view.pendingPort.port === p.id;
-        drawPort(c, w.x, w.y, p.fluid, p.dir, big ? Math.max(5, (7 / cam.zoom) * cam.scale * 1.2) : 3, hot);
+        const size = big ? Math.max(5, (7 / cam.zoom) * cam.scale * 1.2) : 3;
+        drawPort(c, w.x, w.y, p.fluid, p.dir, size, hot);
+        // while laying a pipe, every port it could connect to pulses
+        if (pend && pend.fluid === p.fluid && pend.dir !== p.dir && view.pendingPort!.m !== m.id) {
+          const a = 0.5 + 0.5 * Math.sin(t * 8);
+          c.strokeStyle = `rgba(140,255,170,${0.4 + 0.6 * a})`; c.lineWidth = Math.max(1.5, size * 0.4);
+          c.beginPath(); c.arc(w.x, w.y, size * (1.8 + 0.5 * a), 0, Math.PI * 2); c.stroke();
+        }
       }
       if (view.selection?.type === 'machine' && view.selection.id === m.id) this.drawSelectBox(m, cam, t);
       if (m.kind === 'boiler' || m.kind === 'boiler_ind') {
@@ -1975,7 +2004,7 @@ export class Renderer {
       const p = m && MACHINES[m.kind].ports.find(q => q.id === view.pendingPort!.port);
       if (m && p) {
         const a = portWorld(m, p);
-        c.strokeStyle = p.fluid === 'water' ? C.waterL : '#ffffff';
+        c.strokeStyle = p.fluid === 'water' ? C.waterL : p.fluid === 'seed' ? '#d8f07a' : '#ffffff';
         c.lineWidth = 4;
         c.setLineDash([8, 6]);
         c.lineDashOffset = -t * 30;
