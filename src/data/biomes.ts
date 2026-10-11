@@ -39,7 +39,8 @@ export interface BiomeDef {
   reward: number;          // patents (permanent tech points) on completion
   vegetation: Vegetation;
   /** the land to reforest: soil drying per second, and the forest vitality (0..1) that wakes the Ancient */
-  forest: { dry: number; awaken: number };
+  /** final: forest vitality the land must reach before the Ancient can take its final form */
+  forest: { dry: number; awaken: number; final: number };
   palette: Palette;
   intro: string;
 }
@@ -47,7 +48,7 @@ export interface BiomeDef {
 export const BIOMES: BiomeDef[] = [
   {
     id: 'forest', name: 'Floresta', subtitle: 'Nível 1',
-    width: 3800, groundBase: 1100, factoryEnd: 1500, targetStart: 1900, targetEnd: 3400,
+    width: 4900, groundBase: 1100, factoryEnd: 1500, targetStart: 1900, targetEnd: 4400,
     sea: { x0: -4000, x1: 440, depth: 190 },
     hills: { amp: 26, scale: 520, seed: 3 },
     mountains: [],
@@ -55,7 +56,7 @@ export const BIOMES: BiomeDef[] = [
     temp: { factory: 26, mid: 20, target: 5 },
     condAlt: 330, evap: 0.0015,
     humidity: { start: 14, base: 12, target: 55, loss: 0.012, gainPerL: 0.2, stabilize: 20 },
-    creditPerL: 6, startCredits: 10, reward: 2, vegetation: 'forest', forest: { dry: 0.010, awaken: 0.5 },
+    creditPerL: 6, startCredits: 10, reward: 2, vegetation: 'forest', forest: { dry: 0.010, awaken: 0.5, final: 0.7 },
     intro: 'Dica: arremesse as nuvens até as bandeiras e semeie-as antes.',
     palette: {
       skyTop: '#3d7fd6', skyBottom: '#a9e0ff', dryTop: '#3a2f7a', dryBottom: '#f09a5e', haze: '#d98f8f', glow: '#ffb35c',
@@ -73,7 +74,7 @@ export const BIOMES: BiomeDef[] = [
     temp: { factory: 27, mid: 22, target: 14 },
     condAlt: 380, evap: 0.003,
     humidity: { start: 10, base: 10, target: 55, loss: 0.014, gainPerL: 0.14, stabilize: 25 },
-    creditPerL: 9, startCredits: 250, reward: 3, vegetation: 'fields', forest: { dry: 0.012, awaken: 0.5 },
+    creditPerL: 9, startCredits: 250, reward: 3, vegetation: 'fields', forest: { dry: 0.012, awaken: 0.5, final: 0.7 },
     intro: 'Os campos estão mais longe e o ar rouba umidade. Ventiladores mais fortes ajudam.',
     palette: {
       skyTop: '#4a8ee0', skyBottom: '#bfe6ff', dryTop: '#43306e', dryBottom: '#f5b060', haze: '#e0a080', glow: '#ffc65a',
@@ -91,7 +92,7 @@ export const BIOMES: BiomeDef[] = [
     temp: { factory: 32, mid: 30, target: 22 },
     condAlt: 400, evap: 0.005,
     humidity: { start: 8, base: 8, target: 50, loss: 0.016, gainPerL: 0.1, stabilize: 30 },
-    creditPerL: 14, startCredits: 600, reward: 4, vegetation: 'savanna', forest: { dry: 0.016, awaken: 0.48 },
+    creditPerL: 14, startCredits: 600, reward: 4, vegetation: 'savanna', forest: { dry: 0.016, awaken: 0.48, final: 0.7 },
     intro: 'Calor e ventos que mudam de direção. Domine as correntes com sua própria engenharia.',
     palette: {
       skyTop: '#4a86d8', skyBottom: '#ffd9a8', dryTop: '#5a2a6a', dryBottom: '#ff9a50', haze: '#f09070', glow: '#ff8a3a',
@@ -109,7 +110,7 @@ export const BIOMES: BiomeDef[] = [
     temp: { factory: 24, mid: 16, target: 14 },
     condAlt: 380, evap: 0.003,
     humidity: { start: 10, base: 10, target: 55, loss: 0.015, gainPerL: 0.088, stabilize: 30 },
-    creditPerL: 20, startCredits: 1200, reward: 5, vegetation: 'alpine', forest: { dry: 0.013, awaken: 0.5 },
+    creditPerL: 20, startCredits: 1200, reward: 5, vegetation: 'alpine', forest: { dry: 0.013, awaken: 0.5, final: 0.7 },
     intro: 'Uma cordilheira bloqueia o caminho. As nuvens sobem, esfriam… e chovem cedo demais.',
     palette: {
       skyTop: '#3a78d0', skyBottom: '#b8e0ff', dryTop: '#2a3070', dryBottom: '#d88aa8', haze: '#a8a0c8', glow: '#ff9aa8',
@@ -127,7 +128,7 @@ export const BIOMES: BiomeDef[] = [
     temp: { factory: 34, mid: 38, target: 30 },
     condAlt: 420, evap: 0.008,
     humidity: { start: 4, base: 4, target: 40, loss: 0.02, gainPerL: 0.048, stabilize: 40 },
-    creditPerL: 35, startCredits: 3000, reward: 6, vegetation: 'desert', forest: { dry: 0.022, awaken: 0.45 },
+    creditPerL: 35, startCredits: 3000, reward: 6, vegetation: 'desert', forest: { dry: 0.022, awaken: 0.45, final: 0.7 },
     intro: 'Distância enorme e evaporação brutal. Só tempestades gigantes chegam inteiras.',
     palette: {
       skyTop: '#4a90e0', skyBottom: '#ffe2b0', dryTop: '#5a3060', dryBottom: '#ffb060', haze: '#f0b080', glow: '#ffc040',
@@ -145,7 +146,7 @@ export const BIOMES: BiomeDef[] = [
     temp: { factory: 30, mid: 40, target: 36 },
     condAlt: 420, evap: 0.012,
     humidity: { start: 3, base: 3, target: 40, loss: 0.025, gainPerL: 0.032, stabilize: 45 },
-    creditPerL: 55, startCredits: 8000, reward: 8, vegetation: 'volcanic', forest: { dry: 0.026, awaken: 0.45 },
+    creditPerL: 55, startCredits: 8000, reward: 8, vegetation: 'volcanic', forest: { dry: 0.026, awaken: 0.45, final: 0.7 },
     intro: 'Calor extremo. Use toda a tecnologia climática para trazer vida às cinzas.',
     palette: {
       skyTop: '#5a70c0', skyBottom: '#f0b0a0', dryTop: '#3a1028', dryBottom: '#e0503a', haze: '#a04050', glow: '#ff6a2a',

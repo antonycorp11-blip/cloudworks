@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Sim, STEP } from '../src/sim/sim';
+import { SCALE } from '../src/sim/creature';
 import { MACHINES } from '../src/data/machines';
 import { cloudRadius } from '../src/sim/types';
 import { loadGame, saveGame } from '../src/sim/save';
@@ -489,7 +490,8 @@ describe('the Ancient grows into the factory', () => {
     const s = rise(researched());
     s.credits = 1e6;
     const y = s.biome.groundBase - s.biome.condAlt;
-    const fan = s.build('fan', 1840, y).machine!;
+    const fx = Math.round(s.creature.geometry(SCALE[3]).rootX + 40); // where the stage-3 roots will reach
+    const fan = s.build('fan', fx, y).machine!;
     expect(fan).toBeTruthy();
     const before = s.credits;
     s.climate.humidity = 60;
@@ -501,7 +503,7 @@ describe('the Ancient grows into the factory', () => {
     expect(s.creature.stage).toBeGreaterThanOrEqual(3);
     expect(s.machines.find(m => m.id === fan.id)).toBeUndefined();
     expect(s.credits).toBeGreaterThan(before);
-    expect(s.build('fan', 1840, y).ok).toBe(false);
+    expect(s.build('fan', fx, y).ok).toBe(false);
   });
   it('its body is an obstacle: clouds are pushed over it', () => {
     const s = rise(new Sim(0));

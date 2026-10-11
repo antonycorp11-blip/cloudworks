@@ -19,12 +19,13 @@ function playLevel1(log = false) {
   let seeder: Machine | null = null;
   let pump3: Machine | null = null;
   let fans = 0;
+  let farFans = 0;
   const events: string[] = [];
   let t = 0;
   let awakenAt = -1;
   const say = (x: string) => { events.push(`${Math.round(t)}s ${x} | ₵${Math.round(s.credits)} vida=${(s.forest.vitality * 100).toFixed(0)}% coração=${s.forest.heartLife.toFixed(2)} H=${s.climate.humidity.toFixed(1)}`); };
 
-  while (t < 3600 && !s.climate.won) {
+  while (t < 4800 && !s.climate.won) {
     // manual play: one bucket every ~3 s and keep the fire going (until automated)
     if (!pump && Math.round(t) % 3 === 0) { s.fillBucket(); s.pourBucket(boiler); }
     if (s.mods.lvl('autoStoke') === 0 && boiler.fire < 2 && boiler.water > 1) s.stoke(boiler);
@@ -83,6 +84,12 @@ function playLevel1(log = false) {
       const f = x > 900 ? s.build('fan', x, condY - 20, 0).machine : null;
       if (f) say('fan');
     }
+    // later: a line of gentle fans across the land carries the rain to the far parcels
+    if (s.creature.awake && s.credits >= 120 && farFans < 8) {
+      const x = s.creature.anchor + 120 + farFans * 260;
+      if (x < s.biome.targetEnd - 150 && s.build('fan', x, condY - 30, 0, false, 0.5).ok) say('far fan');
+      farFans++;
+    }
     if (seeder && fans >= 3) {
       for (const k of ['g_seedrate', 'g_germ', 'g_pollen', 'k_roots'] as const) {
         const st = s.nodeState(k);
@@ -95,6 +102,7 @@ function playLevel1(log = false) {
     for (let i = 0; i < 1 / STEP; i++) s.step();
     t++;
     if (awakenAt < 0 && s.creature.awake) { awakenAt = t; say('AWAKEN'); }
+    if (log && t % 240 === 0) events.push('   zonas ' + [0,1,2,3,4].map(z => (s.forest.zoneVitality(z)*100).toFixed(0)).join('/') + ' umid ' + [0,1,2,3,4].map(z => { const [a,b]=s.forest.zoneRange(z); let m=0; for (let i=a;i<b;i++) m+=s.forest.moist[i]; return (m/(b-a)).toFixed(2); }).join('/') + ' fans=' + s.machines.filter(m=>m.kind==='fan').map(m=>Math.round(m.x)).join(','));
     if (log && t % 120 === 0) say(`tick clouds=${s.clouds.clouds.length} rain/s=${s.rates.rain.toFixed(2)} seeds: feitas=${s.stats.seedsMade.toFixed(0)} solo=${s.stats.seedsRained.toFixed(0)} perdidas=${s.stats.seedsWasted.toFixed(0)} cobertura=${(s.forest.coverage * 100).toFixed(0)}% estágio=${s.creature.stage}`);
   }
   return { s, t, events, awakenAt };
@@ -104,9 +112,9 @@ describe('level 1 playthrough', () => {
   it('the forest grows from seeds and rain, the Ancient rises from it and completes the level', () => {
     const { s, t, events, awakenAt } = playLevel1(true);
     console.log(events.join('\n'));
-    expect(awakenAt).toBeGreaterThan(420);  // the forest takes real work
+    expect(awakenAt).toBeGreaterThan(600);  // the forest takes real work
     expect(s.climate.won).toBe(true);
-    expect(t).toBeLessThan(3000);
+    expect(t).toBeLessThan(3600);
     expect(t).toBeGreaterThan(900);        // not trivially short
   }, 120000);
 });

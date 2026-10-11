@@ -42,7 +42,7 @@ export const MAX_HEIGHT = 720;
  */
 export function resolvePlacement(
   biome: BiomeDef, terrain: Terrain, machines: Machine[],
-  kind: MachineKind, wantX: number, wantY: number, ignoreId = -1, blockedFrom = Infinity,
+  kind: MachineKind, wantX: number, wantY: number, ignoreId = -1, blocked: [number, number] = [Infinity, Infinity],
 ): Placement {
   const d = MACHINES[kind];
   const x = snap(wantX);
@@ -105,7 +105,7 @@ export function resolvePlacement(
 
   if (!reason) {
     if (x0 < 0 || x1 > biome.width) reason = 'Fora do mapa';
-    else if (x1 > blockedFrom) reason = 'As raízes da Criatura tomaram este solo';
+    else if (x1 > blocked[0] && x0 < blocked[1]) reason = 'As raízes e o corpo do Ancião ocupam este solo';
     else if (x1 > biome.targetStart - 60 && d.placement !== 'mast') reason = 'Na terra a reflorestar só cabem ventiladores';
     else if (x0 > biome.targetEnd) reason = 'Fora da terra a reflorestar';
   }

@@ -177,7 +177,7 @@ export class Sim implements CloudHost, FluidHost {
     this.stepHelper(dt);
     const m = this.mods;
     const vit = this.forest.vitality;
-    this.creature.perks = { growth: 1 + m.m('rootDepth'), credit: m.m('lullaby'), thirst: 1 - m.m('patience'), forest: 0.6 + 0.8 * vit };
+    this.creature.perks = { growth: 1 + m.m('rootDepth'), credit: m.m('lullaby'), thirst: 1 - m.m('patience'), forest: 0.6 + 0.8 * vit, lockFinal: vit < this.biome.forest.final };
     this.climate.lossMul = this.creature.awake ? this.creature.thirst : 1;
     this.climate.coldStart = Math.min(this.biome.targetStart, this.targetRange()[0]) + 40;
     this.climate.step(dt);
@@ -242,7 +242,11 @@ export class Sim implements CloudHost, FluidHost {
   private stepForest(dt: number) {
     const f = this.forest, cr = this.creature, m = this.mods;
     f.perks = { germ: m.m('germination'), pollen: m.m('pollination') };
-    f.dryMul = (this.veilLeft > 0 ? 2.2 : 1) * (cr.awake ? 1 + 0.12 * cr.stage * cr.perks.thirst : 1);
+    f.dryMul = (this.veilLeft > 0 ? 2.2 : 1) * (cr.awake ? 1 + 0.06 * cr.stage * cr.perks.thirst : 1);
+    if (cr.awake) {
+      const g = cr.geometry();
+      f.shelter = [Math.floor((g.headX - f.x0) / CELL), Math.floor((cr.anchor - f.x0) / CELL)];
+    } else f.shelter = [0, -1];
     const gained = f.step(dt);
     if (gained > 0) {
       this.stats.life += gained;
@@ -266,12 +270,18 @@ export class Sim implements CloudHost, FluidHost {
     // the risen Ancient breathes clouds out of its back
     if (cr.awake && cr.stage >= 2) {
       this.transpireTimer += dt;
-      if (this.transpireTimer >= 12) {
+      // it calls rain over the land behind it: small seed-laden clouds the factory can't reach.
+      // The bigger it grows, the more it calls — that's how the forest becomes giant.
+      if (this.transpireTimer >= 7) {
         this.transpireTimer = 0;
-        const g = cr.geometry();
-        const amount = 0.5 * cr.stage * (0.4 + f.vitality);
-        this.clouds.emit(g.cx, this.terrain.groundY(g.cx) - g.ry * 1.1, amount, 120);
-        this.stats.transpired += amount;
+        const far0 = cr.anchor + 20, far1 = this.biome.targetEnd - 60;
+        if (far1 > far0) {
+          const x = far0 + this.eventRng() * (far1 - far0);
+          const amount = 1 + 0.9 * cr.stage * (0.4 + f.vitality);
+          const c = this.clouds.spawn(x, this.clouds.condY - 20 - this.eventRng() * 60, amount, 0, 0);
+          c.seeds = 2 * cr.stage;
+          this.stats.transpired += amount;
+        }
       }
     }
   }
@@ -374,11 +384,13 @@ export class Sim implements CloudHost, FluidHost {
   targetRange(): [number, number] { return this.creature.awake ? this.creature.zone() : this.regionRange(); }
   /** build limit: nothing may stand where the roots have grown */
   rootLimit() { return this.creature.awake ? this.creature.geometry().rootX : Infinity; }
+  /** the ground the Ancient's roots and body occupy (nothing can be built there); the forest beyond it stays free */
+  rootRange(): [number, number] { return this.creature.awake ? [this.creature.geometry().rootX, this.creature.anchor + 40] : [Infinity, Infinity]; }
 
   /** When the Ancient grows, its roots tear up every machine in the way (fully refunded). */
   private uproot() {
-    const limit = this.rootLimit();
-    const victims = this.machines.filter(m => machineBox(m.kind, m.x, m.y).x1 > limit);
+    const [r0, r1] = this.rootRange();
+    const victims = this.machines.filter(m => { const bx = machineBox(m.kind, m.x, m.y); return bx.x1 > r0 && bx.x0 < r1; });
     if (!victims.length) return;
     let refund = 0;
     for (const m of victims) {
@@ -650,7 +662,7 @@ export class Sim implements CloudHost, FluidHost {
     const def = MACHINES[kind];
     if (!this.isUnlocked(kind)) return { ok: false, reason: 'Ainda bloqueado' };
     if (!this.canAfford(def.cost)) return { ok: false, reason: 'Créditos insuficientes' };
-    const p = resolvePlacement(this.biome, this.terrain, this.machines, kind, x, y, -1, this.rootLimit());
+    const p = resolvePlacement(this.biome, this.terrain, this.machines, kind, x, y, -1, this.rootRange());
     if (!p.ok) return { ok: false, reason: p.reason };
     this.credits -= def.cost;
     const m = this.addMachine(kind, p.x, p.y, def.rotatable ? angle : 0, flip, p.support);
@@ -670,7 +682,7 @@ export class Sim implements CloudHost, FluidHost {
     const m = this.byId.get(id);
     if (!m) return { ok: false };
     if (m.kind === 'platform' && this.onTop(m).length) return { ok: false, reason: 'Remova as máquinas sobre a plataforma primeiro' };
-    const p = resolvePlacement(this.biome, this.terrain, this.machines, m.kind, x, y, id, this.rootLimit());
+    const p = resolvePlacement(this.biome, this.terrain, this.machines, m.kind, x, y, id, this.rootRange());
     if (!p.ok) return { ok: false, reason: p.reason };
     const moved = p.x !== m.x || p.y !== m.y || flip !== m.flip;
     m.x = p.x; m.y = p.y; m.support = p.support; m.flip = flip;

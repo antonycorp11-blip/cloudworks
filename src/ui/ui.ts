@@ -514,7 +514,9 @@ export class UI {
     eye.style.setProperty('--eye', EYE[cr.mood]);
     $('cr-pips').querySelectorAll('i').forEach((p, i) => p.classList.toggle('on', i < cr.stage));
     ($('cr-gfill').style.width = `${Math.round(Math.min(1, cr.progress) * 100)}%`);
-    $('cr-rain').innerHTML = s.rates.rain > 0.02 ? `${s.rates.rain.toFixed(1)} L/s` : '';
+    // after it rises, the forest still has to become giant for the final form
+    const fin = b.forest.final, vit = s.forest.vitality;
+    $('cr-rain').innerHTML = vit < fin ? `Floresta ${Math.round(vit * 100)}% / ${Math.round(fin * 100)}%` : s.rates.rain > 0.02 ? `${s.rates.rain.toFixed(1)} L/s` : '';
     this.finishHud();
   }
 

@@ -60,6 +60,12 @@ export class Renderer {
   private builtFor = '';
   private skyEnd = new Int32Array(0);
   private ceil = new Int32Array(0);
+  private bgCache = new Uint32Array(0);
+  private bgKey = '';
+  private bgEpoch = 0;
+  private bgEpochT = 0;
+  bgHits = 0;
+  bgMiss = 0;
   private sky: SkyEvent[] = [];
   private skyTimer = 25;
   private stars: { x: number; y: number; ph: number; big: boolean }[] = [];
@@ -92,8 +98,9 @@ export class Renderer {
   private cSize = 0.95;
   private cMouth = 0;
   private cBlink = 3;
-  private cZ = 0;
   private risenAt = -1;
+  /** light budget (lowered on slow devices) */
+  maxLights = 48;
 
   constructor(public canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
@@ -207,10 +214,12 @@ export class Renderer {
     const F = sim.forest;
     for (let x = F.x0 - 120; x < F.x1 + 120; x += 6 + r() * 7) {
       const v = r();
-      const kind: Plant['kind'] = v < 0.11 ? 'tree' : v < 0.27 ? 'bush' : v < 0.38 ? 'flower' : 'grass';
+      const kind: Plant['kind'] = v < 0.16 ? 'tree' : v < 0.32 ? 'bush' : v < 0.42 ? 'flower' : 'grass';
       if (Math.abs(x - F.heartX) < 34 && kind !== 'grass') continue; // room for the Semente-Mãe
       const th = kind === 'grass' ? 0.05 + r() * 0.9 : kind === 'flower' ? 0.6 + r() * 0.9 : kind === 'bush' ? 1.05 + r() * 0.9 : 2.0 + r() * 0.95;
-      this.plants.push({ x, kind, th, s: 0.7 + r() * 0.6, h: r(), g: 0 });
+      // a few giants tower over the rest once the forest is mature
+      const giant = kind === 'tree' && r() < 0.3 ? 1.5 + r() * 0.6 : 1;
+      this.plants.push({ x, kind, th: giant > 1 ? Math.max(th, 2.6) : th, s: (0.7 + r() * 0.6) * giant, h: r(), g: 0 });
     }
     for (let x = 20; x < b.factoryEnd; x += 30 + r() * 70) {
       if (x < T.sea.x1 + 40) continue;
@@ -339,7 +348,16 @@ export class Renderer {
     const zF = 60 * z + 6, zM = 90 * z + 8;
     const sunCols0 = sunX - sunR * 1.6, sunCols1 = sunX + sunR * 1.6;
 
-    for (let sx = 0; sx < W; sx++) {
+    // Sky, hills and ground only change when the camera moves or the mood/forest shifts: reuse the
+    // last frame's pixels and redraw just the animated sea columns (phones can't afford the full pass).
+    const q = (v: number) => Math.round(v * 16);
+    if (this.time - this.bgEpochT > 1.5) { this.bgEpochT = this.time; this.bgEpoch++; }
+    const key = `${W}x${H}|${left.toFixed(1)}|${top.toFixed(1)}|${z.toFixed(4)}|${q(st)}|${q(he)}|${q(sun)}|${q(veil)}|${q(viewTarget)}|${this.bgEpoch}|${b.id}`;
+    const cached = key === this.bgKey && this.bgCache.length === buf.length;
+    const cols = cached ? clamp(Math.ceil((T.sea.x1 + 30 - left) * z), 0, W) : W;
+    if (cached) { buf.set(this.bgCache); this.bgHits++; } else this.bgMiss++;
+
+    for (let sx = 0; sx < cols; sx++) {
       const wx = left + (sx + 0.5) / z;
       const lf = cam.x * 0.25 + (sx - W / 2) / z, lm = cam.x * 0.5 + (sx - W / 2) / z, lb = cam.x * 0.1 + (sx - W / 2) / z;
       const syF0 = Math.round((b.groundBase - this.farH(lf, seed) - top) * z);
@@ -433,6 +451,11 @@ export class Renderer {
         else if (d < grassD + 2.5 && sw > syG) c = soilLt; // sunlit lip under the grass
         buf[i] = c;
       }
+    }
+    if (!cached) {
+      if (this.bgCache.length !== buf.length) this.bgCache = new Uint32Array(buf.length);
+      this.bgCache.set(buf);
+      this.bgKey = key;
     }
     // stars, only over open sky
     if (starA > 0.02) {
@@ -1063,154 +1086,163 @@ export class Renderer {
     const eyesClosed = mood === 'sleeping' || this.cBlink < 0;
     const breathe = 1 + (mood === 'euphoric' ? 0.04 : 0.025) * Math.sin(t * (mood === 'starving' ? 3 : 1.3));
     const tremble = mood === 'starving' ? (this.rand() - 0.5) * 1.5 : 0;
-    const stone = hex(skin.stone), light = hex(skin.stoneLight), mossC = mixC(hex('#5a5a3a'), hex(skin.moss), moss);
-    const dark = mul(stone, 0.55);
+    const stone = hex(skin.stone);
+    // ── a gentle forest giant: a mossy mound with a big round face, leaf ears and branch antlers ──
+    const fur = mixC(mixC([120, 110, 60], hex(skin.moss), 0.35 + 0.65 * moss), [255, 255, 255], 0.04);
+    const furDk = mul(fur, 0.68), furLt = mixC(fur, [255, 250, 200], 0.28);
+    const earth = mixC(stone, [90, 60, 40], 0.3), earthDk = mul(earth, 0.7);
+    const happy = mood === 'content' || mood === 'euphoric';
+    const sad = mood === 'starving';
+    const bounce = mood === 'euphoric' ? Math.abs(Math.sin(t * 4)) * 3 : 0;
+    const blob = (pts: [number, number, number][], col: RGB) => { c.fillStyle = css(col); c.beginPath(); for (const [x, y, r] of pts) { c.moveTo(x + r, y); c.arc(x, y, r, 0, Math.PI * 2); } c.fill(); };
     c.save();
-    c.translate(cx + tremble, gy);
+    c.translate(cx + tremble, gy - bounce);
     c.scale(s, s * breathe);
-    // roots spreading into the ground
-    c.strokeStyle = css(dark);
-    c.lineWidth = 5;
-    c.beginPath();
-    for (const [x0, x1] of [[-40, -150], [60, 160], [30, 120], [-10, -95]]) { c.moveTo(x0, -4); c.quadraticCurveTo((x0 + x1) / 2, 6, x1, 10); }
-    c.stroke();
-    // body: a stone shell mound
-    c.fillStyle = css(dark);
-    c.beginPath(); c.ellipse(22, 2, 92, 72, 0, Math.PI, Math.PI * 2); c.fill();
-    c.fillStyle = css(stone);
-    c.beginPath(); c.ellipse(22, 2, 86, 66, 0, Math.PI, Math.PI * 2); c.fill();
-    // moonlit plates on the shell
-    c.fillStyle = css(light);
-    for (const [px, py, pr] of [[-20, -44, 20], [12, -56, 24], [46, -50, 22], [74, -30, 18], [-38, -22, 15]] as const) {
-      c.beginPath(); c.ellipse(px, py, pr, pr * 0.62, -0.2, Math.PI, Math.PI * 2); c.fill();
+    // shadow on the ground
+    c.fillStyle = 'rgba(0,0,0,0.22)';
+    c.beginPath(); c.ellipse(10, 2, 128, 9, 0, 0, Math.PI * 2); c.fill();
+    // stubby paws
+    for (const [px, ph] of [[-46, 0], [-8, 0.6], [62, 1.2], [96, 1.8]] as const) {
+      const step = mood === 'euphoric' ? Math.sin(t * 8 + ph) * 2 : 0;
+      c.fillStyle = css(earthDk); c.beginPath(); c.ellipse(px, -6 - step, 15, 11, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = css(earth); c.beginPath(); c.ellipse(px - 2, -8 - step, 12, 8, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = css(mixC(earth, [255, 240, 220], 0.35));
+      for (const tx of [-6, 0, 6]) c.fillRect(px + tx - 1.5, -3 - step, 3, 3);
     }
-    // cracks glow with the Ancient's mood
-    const glowCol = mood === 'sleeping' ? null : mood === 'starving' ? '255,70,40' : mood === 'content' ? '150,230,255' : mood === 'euphoric' ? '190,255,120' : '255,170,70';
-    c.strokeStyle = glowCol ? `rgba(${glowCol},${0.55 + 0.35 * Math.sin(t * 2)})` : css(mul(stone, 0.4));
-    c.lineWidth = glowCol ? 2.2 : 1.6;
-    c.beginPath();
-    c.moveTo(-8, -60); c.lineTo(-2, -42); c.lineTo(-12, -28); c.moveTo(40, -62); c.lineTo(34, -46); c.lineTo(44, -32); c.lineTo(38, -18); c.moveTo(80, -24); c.lineTo(70, -12);
-    c.stroke();
-    if (glowCol) for (const [lx, ly] of [[-4, -44], [38, -40], [74, -16]]) this.lights.push({ x: cx + lx * s, y: gy + ly * s, r: 26 * s, col: glowCol, a: 0.35 });
-    // ridge spikes
-    c.fillStyle = css(dark);
-    for (let i = 0; i < 6; i++) {
-      const a = Math.PI + 0.35 + i * 0.42;
-      const bx = 22 + Math.cos(a) * 84, by = 2 + Math.sin(a) * 64;
-      c.beginPath(); c.moveTo(bx - 6, by + 2); c.lineTo(bx + Math.cos(a) * 14, by + Math.sin(a) * 14 - 2); c.lineTo(bx + 6, by + 2); c.fill();
-    }
-    // moss grows as it drinks
-    if (moss > 0.02) {
-      c.globalAlpha = 0.4 + 0.6 * moss;
-      for (let i = 0; i < 11; i++) {
-        const a = Math.PI + 0.22 + i * 0.27;
-        const mx = 22 + Math.cos(a) * 82, my = 2 + Math.sin(a) * 62;
-        const r = (4 + 7 * moss) * (0.6 + 0.4 * Math.abs(Math.sin(i * 2.3)));
-        // clumps: dark base, lit top, a few hanging strands
-        c.fillStyle = css(mul(mossC, 0.6));
-        c.beginPath(); c.arc(mx, my + 1, r, 0, 7); c.arc(mx + r * 0.9, my + 2, r * 0.7, 0, 7); c.fill();
-        c.fillStyle = css(mossC);
-        c.beginPath(); c.arc(mx - r * 0.2, my - r * 0.25, r * 0.75, 0, 7); c.arc(mx + r * 0.8, my, r * 0.5, 0, 7); c.fill();
-        c.fillStyle = css(mixC(mossC, [255, 255, 220], 0.3));
-        c.fillRect(mx - r * 0.5, my - r * 0.7, r * 0.5, r * 0.3);
-        if (moss > 0.5 && i % 2 === 0) { c.fillStyle = css(mul(mossC, 0.7)); c.fillRect(mx, my + r * 0.6, 1.2, r * (0.8 + moss)); }
-      }
-      c.globalAlpha = 1;
-    }
-    // a tree grows from its back after stage 2
-    if (cr.stage >= 2 || this.cSize > 1.15) {
-      const g = clamp((this.cSize - 1.1) / 0.6, 0, 1);
-      c.fillStyle = '#2e1e14';
-      c.fillRect(30, -64 - 50 * g, 6, 50 * g + 4);
-      c.strokeStyle = '#2e1e14'; c.lineWidth = 3;
-      c.beginPath(); c.moveTo(33, -64 - 30 * g); c.lineTo(14, -64 - 54 * g); c.moveTo(33, -64 - 40 * g); c.lineTo(52, -64 - 62 * g); c.stroke();
-      if (moss > 0.3) {
-        c.fillStyle = css(mul(hex(skin.moss), 0.8));
-        c.globalAlpha = Math.min(1, (moss - 0.3) * 2);
-        c.beginPath(); c.arc(33, -64 - 58 * g, 22 * g + 6, 0, 7); c.arc(16, -64 - 50 * g, 14 * g + 4, 0, 7); c.arc(50, -64 - 54 * g, 15 * g + 4, 0, 7); c.fill();
-        c.globalAlpha = 1;
+    // the leafy tail tuft
+    const wag = Math.sin(t * (happy ? 4 : 1.5)) * (happy ? 0.25 : 0.08);
+    c.save(); c.translate(104, -34); c.rotate(wag);
+    blob([[14, -6, 13], [24, -14, 9], [22, 2, 9]], furDk);
+    blob([[12, -9, 10], [22, -16, 7]], fur);
+    c.restore();
+    // body: a round mound of leaves with a scalloped back
+    c.fillStyle = css(furDk);
+    c.beginPath(); c.ellipse(24, -32, 92, 46, 0, 0, Math.PI * 2); c.fill();
+    const bumps: [number, number, number][] = [];
+    for (let i = 0; i < 9; i++) { const a = Math.PI + 0.25 + i * 0.33, r = 15 + 5 * Math.sin(i * 2.7); bumps.push([24 + Math.cos(a) * 80, -32 + Math.sin(a) * 40, r]); }
+    blob(bumps, furDk);
+    blob(bumps.map(([x, y, r]) => [x - 2, y - 2, r * 0.86] as [number, number, number]), fur);
+    c.fillStyle = css(fur);
+    c.beginPath(); c.ellipse(24, -30, 88, 42, 0, 0, Math.PI * 2); c.fill();
+    // sunlit leaf tips along the back
+    blob(bumps.slice(1, 8).map(([x, y, r]) => [x - r * 0.35, y - r * 0.45, r * 0.38] as [number, number, number]), furLt);
+    // pale belly
+    c.fillStyle = css(mixC(fur, [255, 245, 210], 0.35));
+    c.beginPath(); c.ellipse(20, -16, 60, 16, 0, 0, Math.PI * 2); c.fill();
+    // a garden on its back: grows with each stage (and with the forest's life)
+    const garden = Math.min(5, cr.stage + 1);
+    for (let i = 0; i < garden; i++) {
+      const gx = -10 + i * 24 + (i % 2) * 6, gb = -32 - Math.sqrt(Math.max(0, 1 - ((gx - 24) / 92) ** 2)) * 46 + 4;
+      if (i % 2 === 0) {
+        // a little tree
+        const th = 16 + 10 * (i % 3);
+        c.fillStyle = '#5a3a22'; c.fillRect(gx - 2, gb - th, 4, th);
+        blob([[gx, gb - th - 6, 10], [gx - 7, gb - th, 7], [gx + 7, gb - th, 7]], mul(fur, 0.8));
+        blob([[gx - 2, gb - th - 8, 7]], furLt);
+      } else {
+        // flowers and a mushroom
+        c.fillStyle = '#3a6a2a'; c.fillRect(gx, gb - 9, 1.5, 9);
+        c.fillStyle = i % 4 === 1 ? '#ff8ab8' : '#ffe066'; c.beginPath(); c.arc(gx + 0.7, gb - 10, 3.5, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#e8e0d0'; c.fillRect(gx + 7, gb - 6, 3, 6);
+        c.fillStyle = '#e0524a'; c.beginPath(); c.ellipse(gx + 8.5, gb - 6, 6, 4, 0, Math.PI, Math.PI * 2); c.fill();
+        c.fillStyle = '#fff'; c.fillRect(gx + 6, gb - 9, 1.5, 1.5); c.fillRect(gx + 10, gb - 8, 1.5, 1.5);
       }
     }
-    // front claws gripping the earth
-    c.fillStyle = css(dark);
-    c.fillRect(-58, -26, 20, 26);
-    c.fillStyle = css(mul(light, 0.9));
-    for (const x of [-66, -58, -50]) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x - 5, 2); c.lineTo(x + 4, -8); c.fill(); }
-    // head (tilts up to drink) — a sculpted, horned stone skull
-    const tilt = -0.34 * this.cMouth + (mood === 'starving' ? Math.sin(t * 20) * 0.02 : Math.sin(t * 0.9) * 0.02);
-    const poly = (pts: number[], fill: string) => { c.fillStyle = fill; c.beginPath(); c.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]); c.closePath(); c.fill(); };
-    const eyeCol = mood === 'starving' ? '#ff3a2a' : mood === 'content' ? '#9ae8ff' : mood === 'euphoric' ? '#c8ff7a' : skin.eye;
+    // ── the head ──
+    const tilt = -0.2 * this.cMouth + (sad ? 0.08 : 0) + Math.sin(t * 0.9) * 0.025;
     c.save();
-    c.translate(-44, -30);
+    c.translate(-62, -50);
     c.rotate(tilt);
-    // neck: thick stone rings
-    poly([6, -22, 18, -8, 16, 18, -10, 20, -14, -12], css(dark));
-    c.fillStyle = css(mul(light, 0.8)); c.fillRect(-8, -8, 22, 3); c.fillRect(-9, 4, 22, 3);
-    // horns: twisted branches sweeping back
-    c.strokeStyle = css(mul(stone, 0.45)); c.lineCap = 'round';
-    c.lineWidth = 6; c.beginPath(); c.moveTo(-14, -30); c.quadraticCurveTo(-4, -64, 26, -72); c.stroke();
-    c.lineWidth = 4; c.beginPath(); c.moveTo(4, -58); c.lineTo(0, -80); c.moveTo(16, -68); c.lineTo(30, -88); c.moveTo(-34, -32); c.quadraticCurveTo(-34, -56, -18, -62); c.stroke();
+    // leaf ears (droop when sad, perk up when happy)
+    const ear = sad ? 0.7 : happy ? -0.15 + Math.sin(t * 3) * 0.08 : 0.2;
+    for (const side of [-1, 1]) {
+      c.save(); c.translate(side * 34, -22); c.rotate(side * (0.9 + ear));
+      c.fillStyle = css(furDk); c.beginPath(); c.ellipse(0, -14, 9, 18, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = css(mixC(fur, [255, 200, 190], 0.25)); c.beginPath(); c.ellipse(0, -13, 5, 12, 0, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = css(furDk); c.lineWidth = 1; c.beginPath(); c.moveTo(0, -2); c.lineTo(0, -26); c.stroke();
+      c.restore();
+    }
+    // branch antlers with leaves (and flowers once it's grown)
+    c.strokeStyle = '#6a4428'; c.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      c.lineWidth = 4;
+      c.beginPath(); c.moveTo(side * 14, -36); c.quadraticCurveTo(side * 20, -58, side * 30, -70); c.stroke();
+      c.lineWidth = 3;
+      c.beginPath(); c.moveTo(side * 21, -55); c.lineTo(side * 36, -60); c.moveTo(side * 26, -64); c.lineTo(side * 22, -78); c.stroke();
+      blob([[side * 30, -72, 5], [side * 37, -61, 4], [side * 22, -79, 4]], mul(fur, 0.9));
+      if (cr.stage >= 3) { c.fillStyle = '#ffd0e8'; c.beginPath(); c.arc(side * 31, -76, 2.5, 0, Math.PI * 2); c.fill(); }
+    }
     c.lineCap = 'butt';
-    if (moss > 0.45) { c.fillStyle = css(hex(skin.moss)); for (const [lx, ly] of [[0, -82], [30, -90], [-18, -64], [26, -74]]) { c.beginPath(); c.arc(lx, ly, 3 + moss * 3, 0, 7); c.fill(); } }
-    // lower jaw (hinged at the back)
-    c.save();
-    c.translate(2, 4);
-    c.rotate(0.6 * this.cMouth);
-    poly([4, -2, -46, -2, -70, 4, -74, 10, -52, 16, -18, 16, 6, 10], css(dark));
-    poly([0, 0, -44, 0, -66, 5, -52, 11, -18, 12, 2, 8], css(stone));
-    c.fillStyle = '#e6dac0';
-    for (const x of [-62, -50, -38, -26]) { c.beginPath(); c.moveTo(x, 1); c.lineTo(x + 3, -7); c.lineTo(x + 6, 1); c.fill(); }
-    c.restore();
-    // glowing gullet when drinking
-    if (this.cMouth > 0.05) {
-      poly([4, 4, -64, 4, -58, 4 + 22 * this.cMouth, -10, 8 + 14 * this.cMouth], '#1a0808');
-      c.fillStyle = `rgba(${mood === 'starving' ? '255,80,40' : '120,200,255'},${0.35 * this.cMouth})`;
-      c.beginPath(); c.ellipse(-24, 8 + 8 * this.cMouth, 16, 5 + 6 * this.cMouth, 0, 0, 7); c.fill();
-    }
-    // upper skull: tapering snout
-    poly([10, -26, -8, -40, -40, -38, -66, -30, -80, -16, -84, -4, -72, 4, -40, 4, 8, 4], css(dark));
-    poly([6, -24, -10, -36, -40, -35, -64, -27, -76, -15, -78, -5, -68, 1, -40, 1, 6, 1], css(stone));
-    // moonlit planes
-    poly([-10, -35, -40, -34, -62, -27, -50, -24, -28, -28, -10, -28], css(light));
-    poly([-70, -12, -76, -6, -68, -2, -56, -6], css(mul(light, 0.85)));
-    // cheek plate & cracks
-    poly([-20, -16, -6, -20, 2, -6, -12, -2], css(mul(stone, 0.8)));
-    c.strokeStyle = glowCol ? `rgba(${glowCol},0.6)` : css(mul(stone, 0.4)); c.lineWidth = 1.4;
-    c.beginPath(); c.moveTo(-30, -34); c.lineTo(-26, -24); c.lineTo(-32, -18); c.stroke();
-    // upper fangs
-    c.fillStyle = '#e6dac0';
-    for (const x of [-72, -60, -46, -32, -18]) { c.beginPath(); c.moveTo(x, 1); c.lineTo(x + 3, x === -72 || x === -32 ? 12 : 7); c.lineTo(x + 6, 1); c.fill(); }
-    // nostril
-    c.fillStyle = '#120c0a'; c.fillRect(-78, -12, 5, 3);
-    if (mood === 'starving' && this.rand() < dt * 5) this.burst(cx + (-44 - 80) * s, gy + (-30 - 12) * s, 1, 1);
-    // heavy brow ridge
-    poly([-12, -34, -40, -40, -66, -30, -62, -24, -40, -31, -14, -27], css(mul(stone, 0.5)));
-    // eyes: slanted, glowing, following the nearest cloud
-    let look = 0;
-    const near = sim.clouds.clouds.reduce<Cloud | null>((b, q) => (!b || Math.abs(q.x - cx) < Math.abs(b.x - cx) ? q : b), null);
-    if (near) look = clamp((near.x - cx) / 600, -1, 1);
-    for (const ex of [-52, -32]) {
-      if (eyesClosed) { c.fillStyle = '#120c0a'; c.fillRect(ex - 6, -23, 12, 2); continue; }
-      poly([ex - 8, -20, ex - 4, -27, ex + 7, -26, ex + 6, -19], '#120c0a');
-      poly([ex - 6, -21, ex - 3, -25, ex + 5, -25, ex + 4, -20], eyeCol);
-      c.fillStyle = '#120c0a'; c.fillRect(ex - 1 + look * 3, -25, 2, 5);
-      c.fillStyle = 'rgba(255,255,255,0.7)'; c.fillRect(ex + 2, -25, 1, 1);
-    }
-    c.restore();
-    c.restore();
-    // glowing eyes light up the night; sleeping Zs
-    if (mood !== 'sleeping') {
-      const ey = gy - 52 * s;
-      this.lights.push({ x: cx - 95 * s, y: ey, r: 55 * s + 20, col: mood === 'starving' ? '255,70,40' : mood === 'content' ? '150,230,255' : mood === 'euphoric' ? '190,255,120' : '255,170,70', a: 0.6 });
-    } else {
-      this.cZ += dt;
-      for (let k = 0; k < 3; k++) {
-        const ph = (this.cZ * 0.4 + k / 3) % 1;
-        const zx = cx - 110 * s + ph * 30 * s, zy = gy - 70 * s - ph * 60 * s, zs = (3 + ph * 4) * Math.max(0.7, s);
-        c.strokeStyle = `rgba(230,230,255,${1 - ph})`; c.lineWidth = 1.5;
-        c.beginPath(); c.moveTo(zx, zy); c.lineTo(zx + zs, zy); c.lineTo(zx, zy + zs); c.lineTo(zx + zs, zy + zs); c.stroke();
+    // face: a round furry head
+    c.fillStyle = css(furDk); c.beginPath(); c.arc(0, 0, 44, 0, Math.PI * 2); c.fill();
+    c.fillStyle = css(fur); c.beginPath(); c.arc(-1, -1, 41, 0, Math.PI * 2); c.fill();
+    blob([[-14, -30, 12], [6, -34, 11], [24, -26, 10]], furLt); // fluffy fringe
+    c.fillStyle = css(fur); c.beginPath(); c.arc(-1, 2, 37, 0, Math.PI * 2); c.fill();
+    // muzzle
+    c.fillStyle = css(mixC(fur, [255, 245, 215], 0.45)); c.beginPath(); c.ellipse(-6, 16, 22, 15, 0, 0, Math.PI * 2); c.fill();
+    // eyes: big, round, shiny — they follow the nearest cloud
+    let look = 0, lookY = 0;
+    const near = sim.clouds.clouds.reduce<Cloud | null>((bb, q) => (!bb || Math.abs(q.x - cx) < Math.abs(bb.x - cx) ? q : bb), null);
+    if (near) { look = clamp((near.x - cx) / 500, -1, 1); lookY = clamp((near.y - gy) / 400, -1, 0); }
+    for (const ex of [-21, 9]) {
+      const ey = -6;
+      if (eyesClosed || mood === 'euphoric') {
+        // happy closed arcs (or a blink)
+        c.strokeStyle = '#2a1a10'; c.lineWidth = 3;
+        c.beginPath();
+        if (mood === 'euphoric') c.arc(ex, ey + 3, 8, Math.PI * 1.1, Math.PI * 1.9); else { c.moveTo(ex - 9, ey); c.lineTo(ex + 9, ey); }
+        c.stroke();
+        continue;
+      }
+      c.fillStyle = '#2a1a10'; c.beginPath(); c.ellipse(ex, ey, 12, 13, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#fffaf0'; c.beginPath(); c.ellipse(ex, ey, 10.5, 11.5, 0, 0, Math.PI * 2); c.fill();
+      const px = ex + look * 3.5, py = ey + 1 + lookY * 3;
+      c.fillStyle = skin.eye; c.beginPath(); c.arc(px, py, 7, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#1a1008'; c.beginPath(); c.arc(px, py, 4.5, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#ffffff'; c.beginPath(); c.arc(px - 2.5, py - 3, 2.4, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(px + 2.5, py + 2, 1.1, 0, Math.PI * 2); c.fill();
+      // eyelids: heavy when starving, a little when thirsty
+      const lid = sad ? 0.55 : mood === 'thirsty' ? 0.2 : 0;
+      if (lid > 0) {
+        c.fillStyle = css(fur);
+        c.beginPath(); c.ellipse(ex, ey - 13 + lid * 12, 13.5, 12, sad ? (ex < 0 ? 0.3 : -0.3) : 0, 0, Math.PI * 2); c.fill();
       }
     }
+    // brows
+    c.strokeStyle = css(furDk); c.lineWidth = 3;
+    c.beginPath();
+    for (const ex of [-21, 9]) { const tilt2 = sad ? (ex < 0 ? -4 : 4) : 0; /* sad: inner ends raised */ c.moveTo(ex - 8, -24 - tilt2); c.lineTo(ex + 8, -24 + tilt2); }
+    c.stroke();
+    // rosy cheeks
+    c.fillStyle = `rgba(255,120,140,${happy ? 0.55 : 0.3})`;
+    c.beginPath(); c.ellipse(-34, 10, 7, 4.5, 0, 0, Math.PI * 2); c.ellipse(20, 10, 7, 4.5, 0, 0, Math.PI * 2); c.fill();
+    // nose
+    c.fillStyle = '#3a2416'; c.beginPath(); c.ellipse(-6, 9, 5, 3.5, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,255,255,0.5)'; c.fillRect(-8, 7, 2, 1.5);
+    // mouth: opens to drink the rain, smiles when content, wobbles when starving
+    c.strokeStyle = '#3a2416'; c.lineWidth = 2.2; c.fillStyle = '#5a1e1e';
+    if (this.cMouth > 0.15) {
+      const o = this.cMouth;
+      c.beginPath(); c.ellipse(-6, 22, 7 + 3 * o, 4 + 6 * o, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+      c.fillStyle = '#ff8a9a'; c.beginPath(); c.ellipse(-6, 24 + 4 * o, 4 + 2 * o, 2 + 2 * o, 0, 0, Math.PI * 2); c.fill();
+    } else if (mood === 'euphoric') {
+      c.beginPath(); c.moveTo(-18, 18); c.quadraticCurveTo(-6, 36, 6, 18); c.closePath(); c.fill(); c.stroke();
+      c.fillStyle = '#ff8a9a'; c.beginPath(); c.ellipse(-6, 26, 5, 3, 0, 0, Math.PI * 2); c.fill();
+    } else if (happy) {
+      c.beginPath(); c.moveTo(-15, 19); c.quadraticCurveTo(-6, 27, 3, 19); c.stroke();
+    } else if (sad) {
+      c.beginPath(); c.moveTo(-14, 25); c.quadraticCurveTo(-10, 21, -6, 24); c.quadraticCurveTo(-2, 21, 2, 25); c.stroke();
+      // a worried drop of sweat
+      c.fillStyle = 'rgba(150,210,255,0.9)'; c.beginPath(); c.ellipse(30, -14 + (t * 6) % 6, 2.5, 3.5, 0, 0, Math.PI * 2); c.fill();
+    } else {
+      c.beginPath(); c.moveTo(-12, 21); c.lineTo(0, 21); c.stroke();
+    }
+    c.restore();
+    c.restore();
+    // a warm glow around it when it's happy; fireflies dance over its back
+    this.creatureHead = { x: cx - 62 * s, y: gy - 120 * s };
+    if (happy) this.lights.push({ x: cx + 10 * s, y: gy - 50 * s, r: 120 * s, col: '200,255,170', a: 0.35 });
+    if (happy && this.rand() < dt * 3) this.burst(cx + (this.rand() - 0.3) * 160 * s, gy - 80 * s, 1, 2);
     if (mood === 'euphoric' && this.rand() < dt * 2) this.burst(cx + (this.rand() - 0.3) * 120 * s, gy - 70 * s, 2, 0);
   }
 
@@ -1880,6 +1912,7 @@ export class Renderer {
       l.fillStyle = g;
       l.fillRect(0, 0, cam.lowW, cam.lowH);
       l.globalCompositeOperation = 'destination-out';
+      if (this.lights.length > this.maxLights) this.lights.sort((a, b) => b.r * b.a - a.r * a.a).length = this.maxLights;
       for (const L of this.lights) {
         const x = (L.x - cam.left) * z, y = (L.y - cam.top) * z, r = L.r * z;
         if (r < 1 || x < -r || y < -r || x > cam.lowW + r || y > cam.lowH + r) continue;

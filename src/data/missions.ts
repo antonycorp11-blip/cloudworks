@@ -39,7 +39,9 @@ export const MISSIONS: MissionDef[] = [
   { id: 'awaken', text: 'Desperte a floresta', hint: 'Vida da terra na meta e o coração de pé: a floresta inteira vai se levantar.', reward: 15, check: s => s.creature.awake },
   { id: 'stage3', text: 'Faça {C} crescer (estágio 3)', hint: 'Agora a chuva que cai sobre o corpo dele o alimenta. E a floresta ainda precisa de água.', reward: 15, check: s => s.creature.stage >= 3 },
   { id: 'storm', text: 'Forme uma nuvem de 40 L', hint: 'Junte vapor e fusões. Nuvens gigantes trazem tempestades.', reward: 12, check: s => s.clouds.clouds.some(c => c.mass >= 40) },
+  { id: 'life60', text: 'Leve a vida da floresta a 60%', hint: 'A floresta inteira precisa crescer — as parcelas do fundo também.', reward: 16, check: s => life(s) >= 0.6 },
   { id: 'stage4', text: 'Leve {C} ao estágio 4', hint: 'Cada estágio dá mais sede — a ele e à floresta. Escale a fábrica para acompanhar.', reward: 18, check: s => s.creature.stage >= 4 },
+  { id: 'giant', text: 'Faça a floresta virar gigante', hint: 'A forma final de {C} só vem com a floresta na meta (veja o painel). Árvores por toda a terra!', reward: 20, check: s => life(s) >= s.biome.forest.final },
 ];
 
 export function activeMissions(s: Sim) {

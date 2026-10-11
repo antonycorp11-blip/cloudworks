@@ -62,7 +62,7 @@ export class Creature {
   }
   /** thirst multiplier on humidity loss: bigger Ancients dry out faster */
   /** tech-tree perks (set by the sim every step) */
-  perks = { growth: 1, credit: 0, thirst: 1, forest: 1 };
+  perks = { growth: 1, credit: 0, thirst: 1, forest: 1, lockFinal: false };
   get thirst() { return (1 + 0.6 * this.stage) * this.perks.thirst; }
   get creditMul() { return MOOD_MUL[this.mood] + (this.mood === 'content' || this.mood === 'euphoric' ? this.perks.credit : 0); }
 
@@ -81,7 +81,11 @@ export class Creature {
     if (!this.awake) return;
     const eff = Math.max(0.25, Math.min(1.2, (humidity - 12) / 30));
     this.growth += litres * eff * this.perks.growth * this.perks.forest;
+    // the final form needs a forest worthy of it: until then growth stops just short of it
+    const last = this.maxStage - 1;
+    if (this.perks.lockFinal && this.stage === last) this.growth = Math.min(this.growth, this.def.needs[last] - 0.01);
     while (!this.done && this.growth >= this.def.needs[this.stage]) {
+      if (this.perks.lockFinal && this.stage === last) { this.growth = this.def.needs[last] - 0.01; break; }
       this.stage++;
       this.bus.emit({ type: 'stageUp', stage: this.stage, final: this.done });
       this.bus.emit({ type: 'sfx', name: 'roar' });

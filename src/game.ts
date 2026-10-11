@@ -34,6 +34,10 @@ export class Game implements InputHandler {
   private acc = 0;
   private lastT = 0;
   private saveTimer = 0;
+  /** adaptive quality: extra pixel size (0..2) on devices that can't hold the frame rate */
+  private lowRes = 0;
+  private slowT = 0;
+  private frameEma = 1 / 60;
   private unsub: (() => void) | null = null;
   canvas: HTMLCanvasElement;
   store: Storage | null;
@@ -76,7 +80,7 @@ export class Game implements InputHandler {
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
-    const pix = dpr >= 2 ? PIX : 2;
+    const pix = (dpr >= 2 ? PIX : 2) + this.lowRes;
     const lowW = Math.max(160, Math.round((w * dpr) / pix));
     const lowH = Math.max(120, Math.round((h * dpr) / pix));
     const wasValid = this.cam.cssW > 50 && this.cam.cssH > 50;
@@ -119,6 +123,7 @@ export class Game implements InputHandler {
   private frame(t: number) {
     const dt = Math.min(0.1, (t - this.lastT) / 1000);
     this.lastT = t;
+    this.adaptQuality(dt);
     if (!this.ui.paused) {
       this.acc += dt;
       let n = 0;
@@ -169,6 +174,22 @@ export class Game implements InputHandler {
 
   save() { if (this.store) saveGame(this.sim, this.store); }
 
+  /** if frames stay slow for a few seconds, render at a coarser pixel size and with fewer lights */
+  private adaptQuality(dt: number) {
+    if (this.ui.paused || document.hidden) return;
+    this.frameEma += (dt - this.frameEma) * 0.05;
+    if (this.frameEma > 1 / 36 && this.lowRes < 2) {
+      this.slowT += dt;
+      if (this.slowT > 3) {
+        this.slowT = 0;
+        this.lowRes++;
+        this.renderer.maxLights = this.lowRes >= 2 ? 16 : 28;
+        this.frameEma = 1 / 60;
+        this.resize();
+      }
+    } else this.slowT = 0;
+  }
+
   // ───────────── modes ─────────────
   setMode(mode: ViewState['mode']) {
     if (mode !== 'place') this.view.ghost = null;
@@ -208,7 +229,7 @@ export class Game implements InputHandler {
   refreshGhost() {
     const g = this.view.ghost;
     if (!g) return;
-    const p = resolvePlacement(this.sim.biome, this.sim.terrain, this.sim.machines, g.kind, this.want.x, this.want.y, g.moveId ?? -1, this.sim.rootLimit());
+    const p = resolvePlacement(this.sim.biome, this.sim.terrain, this.sim.machines, g.kind, this.want.x, this.want.y, g.moveId ?? -1, this.sim.rootRange());
     Object.assign(g, p);
     if (g.moveId == null && !this.sim.canAfford(MACHINES[g.kind].cost) && p.ok) { g.ok = false; g.reason = 'Créditos insuficientes'; }
   }

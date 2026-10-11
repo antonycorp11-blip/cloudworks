@@ -23,6 +23,8 @@ export class Forest {
   /** soil drying multiplier (the Véu thickening, the Ancient drinking) */
   dryMul = 1;
   perks = { germ: 0, pollen: 0 };
+  /** cells under the risen Ancient's body: it keeps that soil damp (it IS that forest) */
+  shelter: [number, number] = [0, -1];
   stats = { seedsLanded: 0, seedsDied: 0 };
   /** a cell reached a new level (1 grass, 2 bush, 3 tree) */
   onTier: ((i: number, tier: number) => void) | null = null;
@@ -121,7 +123,8 @@ export class Forest {
       }
       // mature plants (and the heart) drop seeds around them
       if (l > 1.6 && m > 0.3) this.spread(i, 0.004 * (l - 1.4) * (1 + this.perks.pollen) * dt);
-      if (m < 0.05 && l > 0) l = Math.max(0, l - 0.004 * dt); // drought: plants wilt
+      if (i >= this.shelter[0] && i <= this.shelter[1]) m = Math.max(m, 0.4);
+      else if (m < 0.05 && l > 0) l = Math.max(0, l - 0.004 * dt); // drought: plants wilt
       this.moist[i] = m; this.life[i] = l; this.seeds[i] = s;
       if (l > before) {
         gained += l - before;
