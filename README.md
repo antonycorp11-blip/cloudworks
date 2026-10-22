@@ -27,3 +27,10 @@ npm run build    # build de produção em dist/
 - `src/render/` — renderização Canvas 2D em baixa resolução (pixel art), iluminação e partículas.
 - `src/ui/` — interface DOM (HUD, árvore, oficina, modais).
 - `src/core/` — câmera e entrada (toque, pinça, mouse).
+
+## ATHG — trava da plataforma
+
+Este jogo só roda dentro da ATHG (https://athg.antonycorp11.workers.dev). **Não remova:**
+
+- o `<script>` no topo do `index.html`: aberto fora de um iframe (link direto), redireciona para o player da ATHG (localhost/rede local continuam livres para testes);
+- o `Content-Security-Policy: frame-ancestors` (em `public/_headers` e na config do host): só a ATHG pode exibir o jogo em iframe.
