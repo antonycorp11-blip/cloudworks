@@ -15,6 +15,22 @@
       }
     })();
   </script>
+  <script>
+    // ATHG Modo Gravação: com o foco no jogo, ⌘1/⌘2/⌘3 (Ctrl no Windows) trocam a cena do
+    // estúdio. Só liga quando o estúdio da ATHG avisa; no player normal nada muda.
+    (function () {
+      if (window.top === window.self) return;
+      var studio = false;
+      addEventListener('message', function (e) {
+        if (e.source === window.parent && e.data && e.data.type === 'ATHG_STUDIO_ON') studio = true;
+      });
+      addEventListener('keydown', function (e) {
+        if (!studio || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || ['1', '2', '3'].indexOf(e.key) < 0) return;
+        e.preventDefault();
+        window.parent.postMessage({ type: 'ATHG_STUDIO_KEY', key: e.key }, '*');
+      }, true);
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0f1c" />
   <meta name="mobile-web-app-capable" content="yes" />
