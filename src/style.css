@@ -405,7 +405,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .sheet-head b { font-size: 19px; }
   .sheet-head .muted { display: none; }
   .sheet-head .x { margin-left: auto; }
-  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; overflow-x: hidden; overflow-y: auto; max-height: 40vh; touch-action: pan-y; }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: max-content; gap: 5px; overflow-x: hidden; overflow-y: auto; max-height: 40vh; touch-action: pan-y; }
   .card { width: auto; }
   .card canvas { width: 54px; height: 44px; }
   .card .n { font-size: 11.5px; min-height: 24px; }
@@ -447,3 +447,60 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .worldmap .wm-dot { width: 20px; height: 20px; }
   #bar button .lbl { font-size: 11px; }
 }
+
+/* ── desktop: a slim top bar (resources · land/Ancient status · menu), a tool dock on the left edge,
+      the workshop as a side drawer, panels on the right — the ground and the factory stay clear ── */
+@media (min-width: 900px) and (min-height: 560px) {
+  #hud { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 12px; padding: calc(8px + var(--safe-t)) 12px 0; }
+  #hud::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 78px; z-index: -1; pointer-events: none;
+    background: linear-gradient(180deg, rgba(8,8,16,.55), rgba(8,8,16,0)); }
+  .hud-left { grid-column: 1; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 8px; max-width: none; }
+  .plate.credits { padding: 4px 12px 4px 8px; }
+  .plate.credits b { font-size: 26px; }
+  .chips { flex-wrap: nowrap; }
+  /* the objective sits beside the dock, never under it */
+  .mission { position: absolute; left: 102px; top: calc(66px + var(--safe-t)); width: 300px; max-width: 300px; }
+  .cr-names b { white-space: nowrap; }
+  /* the land / Ancient status, laid out in one row in the middle of the top bar */
+  .creature { grid-column: 2; width: min(800px, 56vw); display: grid; grid-template-columns: minmax(200px, auto) minmax(170px, 1fr) minmax(220px, 1.3fr); align-items: center; gap: 14px; padding: 7px 14px; }
+  .creature .tube { height: 22px; }
+  .creature .cr-growth { font-size: 14px; }
+  .creature .gbar { min-width: 60px; height: 9px; }
+  .creature .cr-top { min-width: 0; }
+  .creature .tube { margin-top: 0; }
+  .creature .cr-growth { margin-top: 0; }
+  .cr-names span { display: block; }
+  /* tool dock on the left edge */
+  #bar { left: 10px; top: 50%; bottom: auto; transform: translateY(-50%); flex-direction: column; gap: 3px; padding: 6px 5px; }
+  #bar button { min-width: 74px; height: 62px; }
+  #bar button .lbl { font-size: 13px; }
+  #b-menu { margin-top: 8px; }
+  #b-menu::after { content: ''; position: absolute; left: 10px; right: 10px; top: -7px; height: 2px; background: var(--ink); box-shadow: 0 1px 0 #4a4552; }
+  /* the workshop opens as a drawer beside the dock, not over the factory */
+  .sheet { left: 102px; right: auto; top: calc(66px + var(--safe-t)); bottom: 16px; margin: 0; width: 344px; display: flex; flex-direction: column; animation: drawerIn .2s ease-out; }
+  .sheet-head { flex-wrap: wrap; }
+  .sheet-head .muted { order: 3; flex-basis: 100%; }
+  .cards { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: max-content; align-content: start; gap: 6px; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; padding: 2px 4px 6px 2px; }
+  .card { width: auto; }
+  .card canvas { width: 70px; height: 57px; }
+  body:has(#shop:not(.hidden)) .mission { display: none; }
+  /* machine / cloud panel: right side, under the top bar */
+  .panel { left: auto; right: 12px; transform: none; top: calc(76px + var(--safe-t)); bottom: auto; width: 360px; max-height: calc(100vh - 100px); overflow-y: auto; }
+  #toasts { top: calc(84px + var(--safe-t)); }
+}
+@media (min-width: 900px) and (max-width: 1279px) and (min-height: 560px) {
+  .creature { width: min(640px, 60vw); grid-template-columns: auto minmax(130px, 1fr) minmax(170px, 1.2fr); gap: 10px; padding: 6px 10px; }
+  .cr-names b { font-size: 18px; }
+  .cr-names span { display: none; }
+  .creature .cr-growth { font-size: 12px; gap: 4px; }
+  .creature .pips { gap: 3px; }
+  .creature .pips i { width: 7px; height: 7px; }
+  .chip b { font-size: 15px; }
+}
+@media (min-width: 900px) and (min-height: 560px) and (max-height: 760px) {
+  #bar button { height: 50px; min-width: 66px; }
+  #bar button .lbl { font-size: 12px; }
+}
+@keyframes drawerIn { from { transform: translateX(-16px); opacity: 0; } }
+
+.tube-label { z-index: 1; }
